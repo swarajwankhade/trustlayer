@@ -5,7 +5,10 @@ description = "TrustLayer MVP backend"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "alembic>=1.14,<2.0",
   "fastapi>=0.115,<1.0",
+  "psycopg[binary]>=3.2,<4.0",
+  "sqlalchemy>=2.0,<3.0",
   "uvicorn>=0.35,<1.0",
 ]
 
@@ -16,5 +19,8 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+markers = [
+  "db: tests that require DATABASE_URL and migrated tables",
+]
 pythonpath = ["backend"]
 testpaths = ["backend/tests"]

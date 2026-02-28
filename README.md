@@ -19,11 +19,25 @@ uv sync --group dev
 Run the API:
 
 ```bash
-uv run uvicorn backend.app.main:app --reload
+uv run uvicorn app.main:app --app-dir backend --reload
 ```
 
 Run tests:
 
 ```bash
 uv run pytest
+```
+
+## Database migrations
+
+Set the local database URL:
+
+```bash
+export DATABASE_URL=postgresql+psycopg://trustlayer:trustlayer@localhost:5432/trustlayer
+```
+
+Run migrations:
+
+```bash
+uv run alembic upgrade head
 ```

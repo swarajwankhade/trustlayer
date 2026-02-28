@@ -8,6 +8,7 @@ class Settings:
     app_name: str = getenv("APP_NAME", "TrustLayer")
     api_host: str = getenv("API_HOST", "0.0.0.0")
     api_port: int = int(getenv("API_PORT", "8000"))
+    database_url: str | None = getenv("DATABASE_URL")
 
 
 def get_settings() -> Settings:
