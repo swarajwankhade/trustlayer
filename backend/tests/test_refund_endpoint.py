@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import require_api_key
 from app.db.session import get_db_session, get_session_factory
 from app.main import app
-from app.models import DecisionEvent
+from app.models import DecisionEvent, Policy
 
 pytestmark = [
     pytest.mark.db,
@@ -41,6 +41,25 @@ def authorized_client(db_session: Session) -> Iterator[TestClient]:
 
 def test_first_refund_call_persists_one_decision_event(authorized_client: TestClient, db_session: Session) -> None:
     request_id = f"req-{uuid.uuid4()}"
+    policy_id = uuid.uuid4()
+
+    db_session.add(
+        Policy(
+            id=policy_id,
+            name=f"active-policy-{policy_id}",
+            version=2,
+            status="ACTIVE",
+            rules_json={
+                "per_action_max_amount": "100.00",
+                "daily_total_cap_amount": "500.00",
+                "per_user_daily_count_cap": 5,
+                "per_user_daily_amount_cap": "200.00",
+                "near_cap_escalation_ratio": "0.9",
+            },
+            created_by="pytest",
+        )
+    )
+    db_session.commit()
 
     response = authorized_client.post(
         "/v1/actions/refund",
@@ -59,17 +78,20 @@ def test_first_refund_call_persists_one_decision_event(authorized_client: TestCl
     assert response.json() == {
         "request_id": request_id,
         "decision": "ALLOW",
-        "reason_codes": ["PLACEHOLDER_ALLOW"],
-        "policy_version": None,
+        "reason_codes": ["WITHIN_POLICY"],
+        "policy_version": 2,
         "model_version": "gpt-test",
     }
 
     events = db_session.scalars(select(DecisionEvent).where(DecisionEvent.request_id == request_id)).all()
     assert len(events) == 1
     assert events[0].action_type == "refund"
+    assert events[0].policy_id == policy_id
+    assert events[0].policy_version == 2
     assert events[0].exposure_snapshot_json == {}
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
     db_session.commit()
 
 
@@ -78,6 +100,7 @@ def test_second_refund_call_with_same_request_id_is_idempotent(
     db_session: Session,
 ) -> None:
     request_id = f"req-{uuid.uuid4()}"
+    policy_id = uuid.uuid4()
     payload = {
         "request_id": request_id,
         "user_id": "user-1",
@@ -88,12 +111,32 @@ def test_second_refund_call_with_same_request_id_is_idempotent(
         "metadata": {"channel": "chat"},
     }
 
+    db_session.add(
+        Policy(
+            id=policy_id,
+            name=f"active-policy-{policy_id}",
+            version=1,
+            status="ACTIVE",
+            rules_json={
+                "per_action_max_amount": "100.00",
+                "daily_total_cap_amount": "500.00",
+                "per_user_daily_count_cap": 5,
+                "per_user_daily_amount_cap": "200.00",
+                "near_cap_escalation_ratio": "0.9",
+            },
+            created_by="pytest",
+        )
+    )
+    db_session.commit()
+
     first_response = authorized_client.post("/v1/actions/refund", json=payload)
     second_response = authorized_client.post("/v1/actions/refund", json=payload)
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
     assert second_response.json() == first_response.json()
+    assert first_response.json()["reason_codes"] == ["WITHIN_POLICY"]
+    assert first_response.json()["policy_version"] == 1
 
     event_count = db_session.scalar(
         select(func.count()).select_from(DecisionEvent).where(DecisionEvent.request_id == request_id)
@@ -101,4 +144,5 @@ def test_second_refund_call_with_same_request_id_is_idempotent(
     assert event_count == 1
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
     db_session.commit()
