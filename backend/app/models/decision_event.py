@@ -14,6 +14,7 @@ class DecisionEvent(Base):
     __table_args__ = (
         Index("ix_decision_events_timestamp", "timestamp"),
         Index("ix_decision_events_policy_version", "policy_id", "policy_version"),
+        Index("uq_decision_events_request_id", "request_id", unique=True),
     )
 
     event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

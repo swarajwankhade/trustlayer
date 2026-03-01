@@ -49,7 +49,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["policy_id"], ["policies.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("event_id"),
     )
-    op.create_index("ix_decision_events_request_id", "decision_events", ["request_id"], unique=False)
+    op.create_index("uq_decision_events_request_id", "decision_events", ["request_id"], unique=True)
     op.create_index("ix_decision_events_timestamp", "decision_events", ["timestamp"], unique=False)
     op.create_index("ix_decision_events_decision", "decision_events", ["decision"], unique=False)
     op.create_index("ix_decision_events_action_type", "decision_events", ["action_type"], unique=False)
@@ -86,7 +86,7 @@ def downgrade() -> None:
     op.drop_index("ix_decision_events_action_type", table_name="decision_events")
     op.drop_index("ix_decision_events_decision", table_name="decision_events")
     op.drop_index("ix_decision_events_timestamp", table_name="decision_events")
-    op.drop_index("ix_decision_events_request_id", table_name="decision_events")
+    op.drop_index("uq_decision_events_request_id", table_name="decision_events")
     op.drop_table("decision_events")
     op.drop_index("ix_policies_created_at", table_name="policies")
     op.drop_index("ix_policies_status", table_name="policies")
