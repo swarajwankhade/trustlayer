@@ -1,4 +1,5 @@
 from typing import Any
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import require_api_key
 from app.api.schemas import RefundActionRequest, RefundActionResponse
 from app.db.session import get_db_session
+from app.exposure.store import ExposureStore, ExposureStoreUnavailableError, get_exposure_store
 from app.models import DecisionEvent
 from app.policies.engine import evaluate_refund
 from app.policies.schemas import ExposureContext
@@ -25,17 +27,28 @@ def healthcheck() -> dict[str, str]:
 def create_refund_action(
     payload: RefundActionRequest,
     db: Session = Depends(get_db_session),
+    exposure_store: ExposureStore = Depends(get_exposure_store),
 ) -> RefundActionResponse:
     existing_event = db.scalar(select(DecisionEvent).where(DecisionEvent.request_id == payload.request_id))
     if existing_event is not None:
         return _build_refund_response(existing_event)
 
     active_policy = load_active_policy(db)
-    decision, reason_codes, _risk_metrics = evaluate_refund(
-        action=payload,
-        exposure_context=ExposureContext(),
-        policy=active_policy.rules,
-    )
+    decision_date = datetime.now(timezone.utc).date()
+
+    try:
+        exposure_context = exposure_store.get_exposure(payload.user_id, decision_date)
+        decision, reason_codes, _risk_metrics = evaluate_refund(
+            action=payload,
+            exposure_context=exposure_context,
+            policy=active_policy.rules,
+        )
+        if decision == "ALLOW":
+            exposure_store.apply_allow(payload.user_id, payload.refund_amount, decision_date)
+    except ExposureStoreUnavailableError:
+        exposure_context = ExposureContext()
+        decision = "ESCALATE"
+        reason_codes = ["REDIS_UNAVAILABLE"]
 
     decision_event = DecisionEvent(
         action_type="refund",
@@ -45,7 +58,7 @@ def create_refund_action(
         model_version=payload.model_version,
         policy_id=active_policy.policy_id,
         policy_version=active_policy.policy_version,
-        exposure_snapshot_json={},
+        exposure_snapshot_json=exposure_context.model_dump(mode="json"),
         action_payload_json=_serialize_payload(payload),
     )
     db.add(decision_event)

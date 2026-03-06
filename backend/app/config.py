@@ -10,6 +10,7 @@ class Settings:
     api_port: int = field(default_factory=lambda: int(getenv("API_PORT", "8000")))
     database_url: str | None = field(default_factory=lambda: getenv("DATABASE_URL"))
     api_key: str | None = field(default_factory=lambda: getenv("API_KEY"))
+    redis_url: str = field(default_factory=lambda: getenv("REDIS_URL", "redis://localhost:6379/0"))
 
 
 def get_settings() -> Settings:

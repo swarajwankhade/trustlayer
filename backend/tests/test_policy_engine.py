@@ -64,6 +64,36 @@ def test_evaluate_refund_escalates_when_near_cap() -> None:
     assert reason_codes == ["NEAR_DAILY_TOTAL_CAP"]
 
 
+def test_evaluate_refund_escalates_when_near_user_amount_cap() -> None:
+    decision, reason_codes, risk_metrics = evaluate_refund(
+        action=RefundActionRequest(
+            request_id="req-escalate-user-amount",
+            user_id="user-1",
+            ticket_id="ticket-1",
+            refund_amount=Decimal("15.00"),
+            currency="USD",
+            model_version="gpt-test",
+            metadata={},
+        ),
+        exposure_context=ExposureContext(
+            daily_total_amount=Decimal("10.00"),
+            per_user_daily_count=1,
+            per_user_daily_amount=Decimal("75.00"),
+        ),
+        policy=PolicyRules(
+            per_action_max_amount=Decimal("100.00"),
+            daily_total_cap_amount=Decimal("500.00"),
+            per_user_daily_count_cap=5,
+            per_user_daily_amount_cap=Decimal("100.00"),
+            near_cap_escalation_ratio=Decimal("0.9"),
+        ),
+    )
+
+    assert decision == "ESCALATE"
+    assert reason_codes == ["NEAR_PER_USER_DAILY_AMOUNT_CAP"]
+    assert risk_metrics["projected_user_daily_amount"] == "90.00"
+
+
 def test_evaluate_refund_blocks_on_hard_violation() -> None:
     decision, reason_codes, _risk_metrics = evaluate_refund(
         action=RefundActionRequest(
