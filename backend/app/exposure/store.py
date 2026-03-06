@@ -18,10 +18,10 @@ class ExposureStoreUnavailableError(RuntimeError):
 
 
 class ExposureStore(Protocol):
-    def get_exposure(self, user_id: str, date: date_type) -> ExposureContext:
+    def get_exposure(self, action_type: str, user_id: str, date: date_type) -> ExposureContext:
         ...
 
-    def apply_allow(self, user_id: str, amount: Decimal, date: date_type) -> ExposureContext:
+    def apply_allow(self, action_type: str, user_id: str, amount: Decimal, date: date_type) -> ExposureContext:
         ...
 
 
@@ -33,12 +33,12 @@ class RedisExposureStore:
     def from_settings(cls) -> "RedisExposureStore":
         return cls(client=Redis.from_url(get_settings().redis_url, decode_responses=True))
 
-    def get_exposure(self, user_id: str, date: date_type) -> ExposureContext:
+    def get_exposure(self, action_type: str, user_id: str, date: date_type) -> ExposureContext:
         try:
             date_bucket = date.isoformat()
-            daily_total_raw = self.client.get(_daily_total_key(date_bucket))
-            per_user_amount_raw = self.client.get(_per_user_amount_key(user_id, date_bucket))
-            per_user_count_raw = self.client.get(_per_user_count_key(user_id, date_bucket))
+            daily_total_raw = self.client.get(_daily_total_key(action_type, date_bucket))
+            per_user_amount_raw = self.client.get(_per_user_amount_key(action_type, user_id, date_bucket))
+            per_user_count_raw = self.client.get(_per_user_count_key(action_type, user_id, date_bucket))
         except RedisError as exc:
             raise ExposureStoreUnavailableError("Redis unavailable") from exc
 
@@ -48,13 +48,13 @@ class RedisExposureStore:
             per_user_daily_count=int(per_user_count_raw or 0),
         )
 
-    def apply_allow(self, user_id: str, amount: Decimal, date: date_type) -> ExposureContext:
+    def apply_allow(self, action_type: str, user_id: str, amount: Decimal, date: date_type) -> ExposureContext:
         try:
             date_bucket = date.isoformat()
             amount_cents = _decimal_to_cents(amount)
-            daily_total_key = _daily_total_key(date_bucket)
-            per_user_amount_key = _per_user_amount_key(user_id, date_bucket)
-            per_user_count_key = _per_user_count_key(user_id, date_bucket)
+            daily_total_key = _daily_total_key(action_type, date_bucket)
+            per_user_amount_key = _per_user_amount_key(action_type, user_id, date_bucket)
+            per_user_count_key = _per_user_count_key(action_type, user_id, date_bucket)
 
             with self.client.pipeline(transaction=True) as pipeline:
                 pipeline.incrby(daily_total_key, amount_cents)
@@ -78,16 +78,16 @@ def get_exposure_store() -> ExposureStore:
     return RedisExposureStore.from_settings()
 
 
-def _daily_total_key(date_bucket: str) -> str:
-    return f"exposure:daily:{date_bucket}:amount"
+def _daily_total_key(action_type: str, date_bucket: str) -> str:
+    return f"exposure:{action_type}:{date_bucket}:total_amount"
 
 
-def _per_user_amount_key(user_id: str, date_bucket: str) -> str:
-    return f"exposure:user:{user_id}:daily:{date_bucket}:amount"
+def _per_user_amount_key(action_type: str, user_id: str, date_bucket: str) -> str:
+    return f"exposure:{action_type}:user:{user_id}:{date_bucket}:amount"
 
 
-def _per_user_count_key(user_id: str, date_bucket: str) -> str:
-    return f"exposure:user:{user_id}:daily:{date_bucket}:count"
+def _per_user_count_key(action_type: str, user_id: str, date_bucket: str) -> str:
+    return f"exposure:{action_type}:user:{user_id}:{date_bucket}:count"
 
 
 def _decimal_to_cents(amount: Decimal) -> int:

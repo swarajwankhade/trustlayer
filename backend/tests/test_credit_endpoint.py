@@ -48,74 +48,66 @@ def authorized_client(db_session: Session, fake_exposure_store: FakeExposureStor
         app.dependency_overrides.clear()
 
 
-def test_first_refund_call_persists_one_decision_event(
+def test_credit_first_request_persists_one_decision_event(
     authorized_client: TestClient,
     db_session: Session,
     fake_exposure_store: FakeExposureStore,
 ) -> None:
     request_id = f"req-{uuid.uuid4()}"
-    policy_id = insert_active_policy(db_session, version=2)
+    policy_id = insert_active_policy(db_session, version=4)
 
     response = authorized_client.post(
-        "/v1/actions/refund",
+        "/v1/actions/credit",
         json={
             "request_id": request_id,
             "user_id": "user-1",
             "ticket_id": "ticket-1",
-            "refund_amount_cents": 1000,
+            "credit_amount_cents": 1500,
             "currency": "USD",
+            "credit_type": "courtesy",
             "model_version": "gpt-test",
             "metadata": {"channel": "chat"},
         },
     )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "request_id": request_id,
-        "decision": "ALLOW",
-        "reason_codes": ["WITHIN_POLICY"],
-        "policy_version": 2,
-        "model_version": "gpt-test",
-    }
-    assert fake_exposure_store.daily_total_amounts["refund"] == Decimal("10.00")
-    assert fake_exposure_store.per_user_daily_amounts[("refund", "user-1")] == Decimal("10.00")
-    assert fake_exposure_store.per_user_daily_counts[("refund", "user-1")] == 1
+    assert response.json()["decision"] == "ALLOW"
+    assert response.json()["policy_version"] == 4
+    assert fake_exposure_store.daily_total_amounts["credit_adjustment"] == Decimal("15.00")
+    assert fake_exposure_store.per_user_daily_counts[("credit_adjustment", "user-1")] == 1
 
     events = db_session.scalars(select(DecisionEvent).where(DecisionEvent.request_id == request_id)).all()
     assert len(events) == 1
-    assert events[0].action_type == "refund"
+    assert events[0].action_type == "credit_adjustment"
     assert events[0].policy_id == policy_id
-    assert events[0].policy_version == 2
-    assert events[0].exposure_snapshot_json == {
-        "daily_total_amount": "0.00",
-        "per_user_daily_count": 0,
-        "per_user_daily_amount": "0.00",
-    }
+    assert events[0].policy_version == 4
+    assert events[0].decision == "ALLOW"
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))
     db_session.commit()
 
 
-def test_refund_idempotent_request_replays_response(
+def test_credit_duplicate_request_id_replays_response(
     authorized_client: TestClient,
     db_session: Session,
     fake_exposure_store: FakeExposureStore,
 ) -> None:
     request_id = f"req-{uuid.uuid4()}"
-    policy_id = insert_active_policy(db_session, version=1)
+    policy_id = insert_active_policy(db_session, version=3)
     payload = {
         "request_id": request_id,
         "user_id": "user-1",
         "ticket_id": "ticket-1",
-        "refund_amount_cents": 1000,
+        "credit_amount_cents": 1000,
         "currency": "USD",
+        "credit_type": "courtesy",
         "model_version": "gpt-test",
         "metadata": {"channel": "chat"},
     }
 
-    first_response = authorized_client.post("/v1/actions/refund", json=payload)
-    second_response = authorized_client.post("/v1/actions/refund", json=payload)
+    first_response = authorized_client.post("/v1/actions/credit", json=payload)
+    second_response = authorized_client.post("/v1/actions/credit", json=payload)
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
@@ -125,9 +117,52 @@ def test_refund_idempotent_request_replays_response(
         select(func.count()).select_from(DecisionEvent).where(DecisionEvent.request_id == request_id)
     )
     assert event_count == 1
-    assert fake_exposure_store.daily_total_amounts["refund"] == Decimal("10.00")
-    assert fake_exposure_store.per_user_daily_counts[("refund", "user-1")] == 1
+    assert fake_exposure_store.daily_total_amounts["credit_adjustment"] == Decimal("10.00")
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_credit_policy_allows_and_blocks_by_amount(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    policy_id = insert_active_policy(db_session, version=2, per_action_max_amount="20.00")
+
+    allow_response = authorized_client.post(
+        "/v1/actions/credit",
+        json={
+            "request_id": f"req-{uuid.uuid4()}",
+            "user_id": "user-1",
+            "ticket_id": "ticket-1",
+            "credit_amount_cents": 1000,
+            "currency": "USD",
+            "credit_type": "courtesy",
+            "model_version": "gpt-test",
+            "metadata": {"channel": "chat"},
+        },
+    )
+    block_response = authorized_client.post(
+        "/v1/actions/credit",
+        json={
+            "request_id": f"req-{uuid.uuid4()}",
+            "user_id": "user-1",
+            "ticket_id": "ticket-1",
+            "credit_amount_cents": 2500,
+            "currency": "USD",
+            "credit_type": "courtesy",
+            "model_version": "gpt-test",
+            "metadata": {"channel": "chat"},
+        },
+    )
+
+    assert allow_response.status_code == 200
+    assert allow_response.json()["decision"] == "ALLOW"
+    assert block_response.status_code == 200
+    assert block_response.json()["decision"] == "BLOCK"
+    assert "PER_ACTION_MAX_AMOUNT_EXCEEDED" in block_response.json()["reason_codes"]
+
+    db_session.execute(delete(DecisionEvent))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))
     db_session.commit()

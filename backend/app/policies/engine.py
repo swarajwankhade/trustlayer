@@ -1,18 +1,17 @@
 from decimal import Decimal
 from typing import Any
 
-from app.api.schemas import RefundActionRequest
 from app.policies.schemas import ExposureContext, PolicyRules
 
 
-def evaluate_refund(
-    action: RefundActionRequest,
+def evaluate_action(
+    amount: Decimal,
     exposure_context: ExposureContext,
     policy: PolicyRules,
 ) -> tuple[str, list[str], dict[str, Any]]:
-    projected_daily_total_amount = exposure_context.daily_total_amount + action.refund_amount
+    projected_daily_total_amount = exposure_context.daily_total_amount + amount
     projected_user_daily_count = exposure_context.per_user_daily_count + 1
-    projected_user_daily_amount = exposure_context.per_user_daily_amount + action.refund_amount
+    projected_user_daily_amount = exposure_context.per_user_daily_amount + amount
 
     risk_metrics = {
         "projected_daily_total_amount": str(projected_daily_total_amount),
@@ -21,7 +20,7 @@ def evaluate_refund(
     }
 
     block_reason_codes: list[str] = []
-    if policy.per_action_max_amount is not None and action.refund_amount > policy.per_action_max_amount:
+    if policy.per_action_max_amount is not None and amount > policy.per_action_max_amount:
         block_reason_codes.append("PER_ACTION_MAX_AMOUNT_EXCEEDED")
     if policy.daily_total_cap_amount is not None and projected_daily_total_amount > policy.daily_total_cap_amount:
         block_reason_codes.append("DAILY_TOTAL_CAP_EXCEEDED")

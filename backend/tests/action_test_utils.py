@@ -1,0 +1,68 @@
+import uuid
+from datetime import date as date_type
+from decimal import Decimal
+
+from sqlalchemy.orm import Session
+
+from app.exposure.store import ExposureStoreUnavailableError
+from app.models import Policy
+from app.policies.schemas import ExposureContext
+
+
+class FakeExposureStore:
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.daily_total_amounts: dict[str, Decimal] = {}
+        self.per_user_daily_amounts: dict[tuple[str, str], Decimal] = {}
+        self.per_user_daily_counts: dict[tuple[str, str], int] = {}
+
+    def get_exposure(self, action_type: str, user_id: str, date: date_type) -> ExposureContext:
+        _ = date
+        if self.fail:
+            raise ExposureStoreUnavailableError("Redis unavailable")
+        return ExposureContext(
+            daily_total_amount=self.daily_total_amounts.get(action_type, Decimal("0.00")),
+            per_user_daily_count=self.per_user_daily_counts.get((action_type, user_id), 0),
+            per_user_daily_amount=self.per_user_daily_amounts.get((action_type, user_id), Decimal("0.00")),
+        )
+
+    def apply_allow(self, action_type: str, user_id: str, amount: Decimal, date: date_type) -> ExposureContext:
+        _ = date
+        if self.fail:
+            raise ExposureStoreUnavailableError("Redis unavailable")
+        self.daily_total_amounts[action_type] = self.daily_total_amounts.get(action_type, Decimal("0.00")) + amount
+        user_amount_key = (action_type, user_id)
+        self.per_user_daily_amounts[user_amount_key] = self.per_user_daily_amounts.get(user_amount_key, Decimal("0.00")) + amount
+        self.per_user_daily_counts[user_amount_key] = self.per_user_daily_counts.get(user_amount_key, 0) + 1
+        return self.get_exposure(action_type, user_id, date)
+
+
+def insert_active_policy(
+    db_session: Session,
+    *,
+    version: int,
+    per_action_max_amount: str = "100.00",
+    daily_total_cap_amount: str = "500.00",
+    per_user_daily_count_cap: int = 5,
+    per_user_daily_amount_cap: str = "200.00",
+    near_cap_escalation_ratio: str = "0.9",
+) -> uuid.UUID:
+    policy_id = uuid.uuid4()
+    db_session.add(
+        Policy(
+            id=policy_id,
+            name=f"active-policy-{policy_id}",
+            version=version,
+            status="ACTIVE",
+            rules_json={
+                "per_action_max_amount": per_action_max_amount,
+                "daily_total_cap_amount": daily_total_cap_amount,
+                "per_user_daily_count_cap": per_user_daily_count_cap,
+                "per_user_daily_amount_cap": per_user_daily_amount_cap,
+                "near_cap_escalation_ratio": near_cap_escalation_ratio,
+            },
+            created_by="pytest",
+        )
+    )
+    db_session.commit()
+    return policy_id

@@ -7,14 +7,25 @@ from pydantic import BaseModel, ConfigDict, Field
 class RefundActionRequest(BaseModel):
     request_id: str
     user_id: str
-    ticket_id: str
-    refund_amount: Decimal = Field(gt=0)
+    ticket_id: str | None = None
+    refund_amount_cents: int = Field(gt=0)
     currency: str = Field(min_length=3, max_length=3)
     model_version: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class RefundActionResponse(BaseModel):
+class CreditActionRequest(BaseModel):
+    request_id: str
+    user_id: str
+    ticket_id: str | None = None
+    credit_amount_cents: int = Field(gt=0)
+    currency: str = Field(min_length=3, max_length=3)
+    credit_type: str | None = None
+    model_version: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ActionDecisionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     request_id: str
@@ -22,3 +33,7 @@ class RefundActionResponse(BaseModel):
     reason_codes: list[str]
     policy_version: int | None = None
     model_version: str | None = None
+
+
+def cents_to_decimal(amount_cents: int) -> Decimal:
+    return (Decimal(amount_cents) / Decimal("100")).quantize(Decimal("0.01"))
