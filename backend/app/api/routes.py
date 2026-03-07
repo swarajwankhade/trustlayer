@@ -1,25 +1,28 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import desc, select, update
 from sqlalchemy.orm import Session
 
-from app.actions.service import ActionAuthorizationInput, authorize_action
+from app.actions.service import ActionAuthorizationInput, authorize_action, get_or_init_kill_switch
 from app.api.dependencies import require_api_key
 from app.api.schemas import (
     ActionDecisionResponse,
     CreditActionRequest,
     CreatePolicyRequest,
+    DecisionEventResponse,
+    KillSwitchResponse,
+    KillSwitchUpdateRequest,
     PolicyResponse,
     RefundActionRequest,
     cents_to_decimal,
 )
 from app.db.session import get_db_session
 from app.exposure.store import ExposureStore, get_exposure_store
-from app.models import DecisionEvent
-from app.models import Policy
+from app.models import DecisionEvent, KillSwitch, Policy
 from app.policies.schemas import PolicyRules
 
 router = APIRouter()
@@ -123,6 +126,55 @@ def get_active_policy(db: Session = Depends(get_db_session)) -> PolicyResponse:
     if policy is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active policy")
     return PolicyResponse.model_validate(policy, from_attributes=True)
+
+
+@v1_router.get("/admin/killswitch", response_model=KillSwitchResponse)
+def get_kill_switch(db: Session = Depends(get_db_session)) -> KillSwitchResponse:
+    kill_switch = get_or_init_kill_switch(db)
+    return KillSwitchResponse.model_validate(kill_switch, from_attributes=True)
+
+
+@v1_router.post("/admin/killswitch", response_model=KillSwitchResponse)
+def update_kill_switch(payload: KillSwitchUpdateRequest, db: Session = Depends(get_db_session)) -> KillSwitchResponse:
+    kill_switch = get_or_init_kill_switch(db)
+    kill_switch.enabled = payload.enabled
+    kill_switch.reason = payload.reason
+    kill_switch.updated_by = payload.updated_by
+    db.add(kill_switch)
+    db.commit()
+    db.refresh(kill_switch)
+    return KillSwitchResponse.model_validate(kill_switch, from_attributes=True)
+
+
+@v1_router.get("/admin/decisions", response_model=list[DecisionEventResponse])
+def list_decisions(
+    action_type: str | None = None,
+    decision: str | None = None,
+    request_id: str | None = None,
+    user_id: str | None = None,
+    from_ts: datetime | None = Query(default=None, alias="from"),
+    to_ts: datetime | None = Query(default=None, alias="to"),
+    limit: int = 50,
+    db: Session = Depends(get_db_session),
+) -> list[DecisionEventResponse]:
+    normalized_limit = min(max(limit, 1), 200)
+    query = select(DecisionEvent)
+
+    if action_type:
+        query = query.where(DecisionEvent.action_type == action_type)
+    if decision:
+        query = query.where(DecisionEvent.decision == decision)
+    if request_id:
+        query = query.where(DecisionEvent.request_id == request_id)
+    if user_id:
+        query = query.where(DecisionEvent.action_payload_json["user_id"].astext == user_id)
+    if from_ts:
+        query = query.where(DecisionEvent.timestamp >= from_ts)
+    if to_ts:
+        query = query.where(DecisionEvent.timestamp <= to_ts)
+
+    events = db.scalars(query.order_by(desc(DecisionEvent.timestamp)).limit(normalized_limit)).all()
+    return [DecisionEventResponse.model_validate(event, from_attributes=True) for event in events]
 
 
 def _build_action_response(event: DecisionEvent) -> ActionDecisionResponse:

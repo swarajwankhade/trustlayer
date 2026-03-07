@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -50,6 +51,34 @@ class PolicyResponse(BaseModel):
     status: str
     rules_json: dict[str, Any]
     created_by: str
+
+
+class KillSwitchUpdateRequest(BaseModel):
+    enabled: bool
+    reason: str = Field(min_length=1)
+    updated_by: str = Field(min_length=1, max_length=255)
+
+
+class KillSwitchResponse(BaseModel):
+    id: int
+    enabled: bool
+    reason: str | None
+    updated_at: datetime
+    updated_by: str
+
+
+class DecisionEventResponse(BaseModel):
+    event_id: UUID
+    timestamp: datetime
+    action_type: str
+    request_id: str
+    decision: str
+    reason_codes: list[str]
+    model_version: str | None
+    policy_id: UUID | None
+    policy_version: int | None
+    exposure_snapshot_json: dict[str, Any]
+    action_payload_json: dict[str, Any] | None
 
 
 def cents_to_decimal(amount_cents: int) -> Decimal:
