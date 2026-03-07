@@ -75,6 +75,7 @@ def test_credit_first_request_persists_one_decision_event(
     assert response.json()["policy_version"] == 4
     assert fake_exposure_store.daily_total_amounts["credit_adjustment"] == Decimal("15.00")
     assert fake_exposure_store.per_user_daily_counts[("credit_adjustment", "user-1")] == 1
+    assert fake_exposure_store.financial_total_amount == Decimal("15.00")
 
     events = db_session.scalars(select(DecisionEvent).where(DecisionEvent.request_id == request_id)).all()
     assert len(events) == 1
@@ -118,6 +119,7 @@ def test_credit_duplicate_request_id_replays_response(
     )
     assert event_count == 1
     assert fake_exposure_store.daily_total_amounts["credit_adjustment"] == Decimal("10.00")
+    assert fake_exposure_store.financial_total_amount == Decimal("10.00")
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))
@@ -162,6 +164,57 @@ def test_credit_policy_allows_and_blocks_by_amount(
     assert block_response.status_code == 200
     assert block_response.json()["decision"] == "BLOCK"
     assert "PER_ACTION_MAX_AMOUNT_EXCEEDED" in block_response.json()["reason_codes"]
+
+    db_session.execute(delete(DecisionEvent))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_refund_and_credit_stack_against_combined_daily_cap(
+    authorized_client: TestClient,
+    db_session: Session,
+    fake_exposure_store: FakeExposureStore,
+) -> None:
+    policy_id = insert_active_policy(
+        db_session,
+        version=5,
+        daily_total_cap_amount="100.00",
+        per_action_max_amount="200.00",
+        per_user_daily_amount_cap="200.00",
+    )
+
+    refund_response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": f"req-{uuid.uuid4()}",
+            "user_id": "user-1",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 6000,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+    credit_response = authorized_client.post(
+        "/v1/actions/credit",
+        json={
+            "request_id": f"req-{uuid.uuid4()}",
+            "user_id": "user-1",
+            "ticket_id": "ticket-1",
+            "credit_amount_cents": 5000,
+            "currency": "USD",
+            "credit_type": "courtesy",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+
+    assert refund_response.status_code == 200
+    assert refund_response.json()["decision"] == "ALLOW"
+    assert credit_response.status_code == 200
+    assert credit_response.json()["decision"] == "BLOCK"
+    assert "DAILY_TOTAL_CAP_EXCEEDED" in credit_response.json()["reason_codes"]
+    assert fake_exposure_store.financial_total_amount == Decimal("60.00")
 
     db_session.execute(delete(DecisionEvent))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))

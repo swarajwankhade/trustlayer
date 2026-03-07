@@ -36,11 +36,12 @@ def authorize_action(
     decision_date = datetime.now(timezone.utc).date()
 
     try:
+        financial_total_amount_cents = exposure_store.get_financial_total(decision_date)
         exposure_context = exposure_store.get_exposure(
             action_type=action.action_type,
             user_id=action.user_id,
             date=decision_date,
-        )
+        ).model_copy(update={"financial_total_amount_cents": financial_total_amount_cents})
         decision, reason_codes, _risk_metrics = evaluate_action(
             amount=action.amount,
             exposure_context=exposure_context,
@@ -50,6 +51,10 @@ def authorize_action(
             exposure_store.apply_allow(
                 action_type=action.action_type,
                 user_id=action.user_id,
+                amount=action.amount,
+                date=decision_date,
+            )
+            exposure_store.increment_financial_total(
                 amount=action.amount,
                 date=decision_date,
             )

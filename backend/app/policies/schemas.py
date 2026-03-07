@@ -17,3 +17,4 @@ class ExposureContext(BaseModel):
     daily_total_amount: Decimal = Decimal("0")
     per_user_daily_count: int = 0
     per_user_daily_amount: Decimal = Decimal("0")
+    financial_total_amount_cents: int = 0

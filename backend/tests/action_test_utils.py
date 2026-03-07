@@ -15,6 +15,7 @@ class FakeExposureStore:
         self.daily_total_amounts: dict[str, Decimal] = {}
         self.per_user_daily_amounts: dict[tuple[str, str], Decimal] = {}
         self.per_user_daily_counts: dict[tuple[str, str], int] = {}
+        self.financial_total_amount = Decimal("0.00")
 
     def get_exposure(self, action_type: str, user_id: str, date: date_type) -> ExposureContext:
         _ = date
@@ -24,6 +25,7 @@ class FakeExposureStore:
             daily_total_amount=self.daily_total_amounts.get(action_type, Decimal("0.00")),
             per_user_daily_count=self.per_user_daily_counts.get((action_type, user_id), 0),
             per_user_daily_amount=self.per_user_daily_amounts.get((action_type, user_id), Decimal("0.00")),
+            financial_total_amount_cents=int(self.financial_total_amount * 100),
         )
 
     def apply_allow(self, action_type: str, user_id: str, amount: Decimal, date: date_type) -> ExposureContext:
@@ -35,6 +37,19 @@ class FakeExposureStore:
         self.per_user_daily_amounts[user_amount_key] = self.per_user_daily_amounts.get(user_amount_key, Decimal("0.00")) + amount
         self.per_user_daily_counts[user_amount_key] = self.per_user_daily_counts.get(user_amount_key, 0) + 1
         return self.get_exposure(action_type, user_id, date)
+
+    def get_financial_total(self, date: date_type) -> int:
+        _ = date
+        if self.fail:
+            raise ExposureStoreUnavailableError("Redis unavailable")
+        return int(self.financial_total_amount * 100)
+
+    def increment_financial_total(self, amount: Decimal, date: date_type) -> int:
+        _ = date
+        if self.fail:
+            raise ExposureStoreUnavailableError("Redis unavailable")
+        self.financial_total_amount += amount
+        return int(self.financial_total_amount * 100)
 
 
 def insert_active_policy(

@@ -24,6 +24,12 @@ class ExposureStore(Protocol):
     def apply_allow(self, action_type: str, user_id: str, amount: Decimal, date: date_type) -> ExposureContext:
         ...
 
+    def get_financial_total(self, date: date_type) -> int:
+        ...
+
+    def increment_financial_total(self, amount: Decimal, date: date_type) -> int:
+        ...
+
 
 @dataclass
 class RedisExposureStore:
@@ -39,6 +45,7 @@ class RedisExposureStore:
             daily_total_raw = self.client.get(_daily_total_key(action_type, date_bucket))
             per_user_amount_raw = self.client.get(_per_user_amount_key(action_type, user_id, date_bucket))
             per_user_count_raw = self.client.get(_per_user_count_key(action_type, user_id, date_bucket))
+            financial_total_raw = self.client.get(_financial_total_key(date_bucket))
         except RedisError as exc:
             raise ExposureStoreUnavailableError("Redis unavailable") from exc
 
@@ -46,6 +53,7 @@ class RedisExposureStore:
             daily_total_amount=_cents_to_decimal(daily_total_raw),
             per_user_daily_amount=_cents_to_decimal(per_user_amount_raw),
             per_user_daily_count=int(per_user_count_raw or 0),
+            financial_total_amount_cents=int(financial_total_raw or 0),
         )
 
     def apply_allow(self, action_type: str, user_id: str, amount: Decimal, date: date_type) -> ExposureContext:
@@ -73,6 +81,26 @@ class RedisExposureStore:
             per_user_daily_count=int(results[4]),
         )
 
+    def get_financial_total(self, date: date_type) -> int:
+        try:
+            value = self.client.get(_financial_total_key(date.isoformat()))
+        except RedisError as exc:
+            raise ExposureStoreUnavailableError("Redis unavailable") from exc
+        return int(value or 0)
+
+    def increment_financial_total(self, amount: Decimal, date: date_type) -> int:
+        try:
+            financial_total_key = _financial_total_key(date.isoformat())
+            amount_cents = _decimal_to_cents(amount)
+
+            with self.client.pipeline(transaction=True) as pipeline:
+                pipeline.incrby(financial_total_key, amount_cents)
+                pipeline.expire(financial_total_key, TTL_SECONDS)
+                results = pipeline.execute()
+        except RedisError as exc:
+            raise ExposureStoreUnavailableError("Redis unavailable") from exc
+        return int(results[0])
+
 
 def get_exposure_store() -> ExposureStore:
     return RedisExposureStore.from_settings()
@@ -88,6 +116,10 @@ def _per_user_amount_key(action_type: str, user_id: str, date_bucket: str) -> st
 
 def _per_user_count_key(action_type: str, user_id: str, date_bucket: str) -> str:
     return f"exposure:{action_type}:user:{user_id}:{date_bucket}:count"
+
+
+def _financial_total_key(date_bucket: str) -> str:
+    return f"exposure:financial_total:{date_bucket}"
 
 
 def _decimal_to_cents(amount: Decimal) -> int:

@@ -80,6 +80,7 @@ def test_first_refund_call_persists_one_decision_event(
     assert fake_exposure_store.daily_total_amounts["refund"] == Decimal("10.00")
     assert fake_exposure_store.per_user_daily_amounts[("refund", "user-1")] == Decimal("10.00")
     assert fake_exposure_store.per_user_daily_counts[("refund", "user-1")] == 1
+    assert fake_exposure_store.financial_total_amount == Decimal("10.00")
 
     events = db_session.scalars(select(DecisionEvent).where(DecisionEvent.request_id == request_id)).all()
     assert len(events) == 1
@@ -90,6 +91,7 @@ def test_first_refund_call_persists_one_decision_event(
         "daily_total_amount": "0.00",
         "per_user_daily_count": 0,
         "per_user_daily_amount": "0.00",
+        "financial_total_amount_cents": 0,
     }
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
@@ -127,6 +129,7 @@ def test_refund_idempotent_request_replays_response(
     assert event_count == 1
     assert fake_exposure_store.daily_total_amounts["refund"] == Decimal("10.00")
     assert fake_exposure_store.per_user_daily_counts[("refund", "user-1")] == 1
+    assert fake_exposure_store.financial_total_amount == Decimal("10.00")
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))

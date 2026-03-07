@@ -33,6 +33,7 @@ def test_evaluate_action_escalates_when_near_cap() -> None:
             daily_total_amount=Decimal("85.00"),
             per_user_daily_count=1,
             per_user_daily_amount=Decimal("40.00"),
+            financial_total_amount_cents=8500,
         ),
         policy=PolicyRules(
             per_action_max_amount=Decimal("100.00"),
@@ -72,15 +73,15 @@ def test_evaluate_action_escalates_when_near_user_amount_cap() -> None:
 def test_evaluate_action_blocks_on_hard_violation() -> None:
     decision, reason_codes, _risk_metrics = evaluate_action(
         amount=Decimal("120.00"),
-        exposure_context=ExposureContext(),
+        exposure_context=ExposureContext(financial_total_amount_cents=40000),
         policy=PolicyRules(
-            per_action_max_amount=Decimal("100.00"),
+            per_action_max_amount=Decimal("200.00"),
             daily_total_cap_amount=Decimal("500.00"),
             per_user_daily_count_cap=5,
-            per_user_daily_amount_cap=Decimal("200.00"),
+            per_user_daily_amount_cap=Decimal("500.00"),
             near_cap_escalation_ratio=Decimal("0.9"),
         ),
     )
 
     assert decision == "BLOCK"
-    assert reason_codes == ["PER_ACTION_MAX_AMOUNT_EXCEEDED"]
+    assert reason_codes == ["DAILY_TOTAL_CAP_EXCEEDED"]
