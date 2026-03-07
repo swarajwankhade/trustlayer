@@ -2,6 +2,7 @@ import uuid
 from datetime import date as date_type
 from decimal import Decimal
 
+from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 
 from app.exposure.store import ExposureStoreUnavailableError
@@ -62,6 +63,10 @@ def insert_active_policy(
     per_user_daily_amount_cap: int = 20_000,
     near_cap_escalation_ratio: float = 0.9,
 ) -> uuid.UUID:
+    db_session.execute(
+        update(Policy).where(func.lower(Policy.status) == "active").values(status="INACTIVE")
+    )
+
     policy_id = uuid.uuid4()
     db_session.add(
         Policy(

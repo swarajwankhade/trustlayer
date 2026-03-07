@@ -1,9 +1,9 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class RefundActionRequest(BaseModel):
@@ -88,6 +88,62 @@ class DecisionReplayResponse(BaseModel):
     replayed_decision: str
     replayed_reason_codes: list[str]
     matches_original: bool
+
+
+class SimulateRefundPayload(BaseModel):
+    user_id: str
+    refund_amount_cents: int = Field(gt=0)
+    currency: str = Field(min_length=3, max_length=3)
+    ticket_id: str | None = None
+    model_version: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SimulateCreditPayload(BaseModel):
+    user_id: str
+    credit_amount_cents: int = Field(gt=0)
+    currency: str = Field(min_length=3, max_length=3)
+    credit_type: str | None = None
+    ticket_id: str | None = None
+    model_version: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SimulationExposureOverride(BaseModel):
+    daily_total_amount_cents: int = Field(default=0, ge=0)
+    per_user_daily_count: int = Field(default=0, ge=0)
+    per_user_daily_amount_cents: int = Field(default=0, ge=0)
+    financial_total_amount_cents: int = Field(default=0, ge=0)
+
+
+class SimulationRequest(BaseModel):
+    action_type: Literal["refund", "credit_adjustment"]
+    refund: SimulateRefundPayload | None = None
+    credit: SimulateCreditPayload | None = None
+    policy_id: UUID | None = None
+    policy_version: int | None = Field(default=None, gt=0)
+    exposure_override: SimulationExposureOverride | None = None
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> "SimulationRequest":
+        if self.action_type == "refund":
+            if self.refund is None or self.credit is not None:
+                raise ValueError("refund payload is required for action_type=refund")
+        if self.action_type == "credit_adjustment":
+            if self.credit is None or self.refund is not None:
+                raise ValueError("credit payload is required for action_type=credit_adjustment")
+        if (self.policy_id is None) != (self.policy_version is None):
+            raise ValueError("policy_id and policy_version must be provided together")
+        return self
+
+
+class SimulationResponse(BaseModel):
+    action_type: Literal["refund", "credit_adjustment"]
+    decision: str
+    reason_codes: list[str]
+    policy_id: UUID | None
+    policy_version: int | None
+    exposure_context_used: dict[str, Any]
 
 
 def cents_to_decimal(amount_cents: int) -> Decimal:

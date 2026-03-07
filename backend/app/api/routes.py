@@ -20,6 +20,8 @@ from app.api.schemas import (
     KillSwitchUpdateRequest,
     PolicyResponse,
     RefundActionRequest,
+    SimulationRequest,
+    SimulationResponse,
     cents_to_decimal,
 )
 from app.db.session import get_db_session
@@ -27,6 +29,7 @@ from app.exposure.store import ExposureStore, get_exposure_store
 from app.models import DecisionEvent, Policy
 from app.policies.engine import evaluate_action
 from app.policies.schemas import ExposureContext, PolicyRules
+from app.policies.service import ActivePolicy, load_active_policy
 
 router = APIRouter()
 v1_router = APIRouter(prefix="/v1", dependencies=[Depends(require_api_key)])
@@ -252,6 +255,28 @@ def replay_decision(event_id: UUID, db: Session = Depends(get_db_session)) -> De
     )
 
 
+@v1_router.post("/admin/simulate", response_model=SimulationResponse)
+def simulate_action(payload: SimulationRequest, db: Session = Depends(get_db_session)) -> SimulationResponse:
+    policy_context = _load_simulation_policy(db, payload)
+    exposure_context = _resolve_simulation_exposure(payload)
+    amount = _extract_simulation_amount(payload)
+
+    decision, reason_codes, _risk_metrics = evaluate_action(
+        amount=amount,
+        exposure_context=exposure_context,
+        policy=policy_context.rules,
+    )
+
+    return SimulationResponse(
+        action_type=payload.action_type,
+        decision=decision,
+        reason_codes=policy_context.base_reason_codes + reason_codes,
+        policy_id=policy_context.policy_id,
+        policy_version=policy_context.policy_version,
+        exposure_context_used=exposure_context.model_dump(mode="json"),
+    )
+
+
 def _build_action_response(event: DecisionEvent) -> ActionDecisionResponse:
     return ActionDecisionResponse(
         request_id=event.request_id,
@@ -274,3 +299,46 @@ def _extract_amount_from_payload(action_type: str, payload: dict[str, Any]) -> D
         parsed = CreditActionRequest.model_validate(payload)
         return cents_to_decimal(parsed.credit_amount_cents)
     raise ValueError(f"Unsupported action_type for replay: {action_type}")
+
+
+def _load_simulation_policy(db: Session, payload: SimulationRequest) -> ActivePolicy:
+    if payload.policy_id is None or payload.policy_version is None:
+        return load_active_policy(db)
+
+    policy = db.scalar(
+        select(Policy).where(Policy.id == payload.policy_id, Policy.version == payload.policy_version).limit(1)
+    )
+    if policy is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Policy not found for provided policy_id and policy_version",
+        )
+    return ActivePolicy(
+        policy_id=policy.id,
+        policy_version=policy.version,
+        rules=PolicyRules.model_validate(policy.rules_json),
+    )
+
+
+def _resolve_simulation_exposure(payload: SimulationRequest) -> ExposureContext:
+    if payload.exposure_override is None:
+        return ExposureContext()
+
+    return ExposureContext(
+        daily_total_amount=cents_to_decimal(payload.exposure_override.daily_total_amount_cents),
+        per_user_daily_count=payload.exposure_override.per_user_daily_count,
+        per_user_daily_amount=cents_to_decimal(payload.exposure_override.per_user_daily_amount_cents),
+        financial_total_amount_cents=payload.exposure_override.financial_total_amount_cents,
+    )
+
+
+def _extract_simulation_amount(payload: SimulationRequest) -> Decimal:
+    if payload.action_type == "refund":
+        if payload.refund is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="refund payload is required")
+        return cents_to_decimal(payload.refund.refund_amount_cents)
+    if payload.action_type == "credit_adjustment":
+        if payload.credit is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="credit payload is required")
+        return cents_to_decimal(payload.credit.credit_amount_cents)
+    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported action_type")

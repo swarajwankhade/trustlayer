@@ -311,3 +311,165 @@ def test_decision_detail_and_replay_return_404_for_missing_event(authorized_clie
 
     assert detail_response.status_code == 404
     assert replay_response.status_code == 404
+
+
+def test_simulate_refund_with_active_policy(authorized_client: TestClient, db_session: Session) -> None:
+    policy_id = insert_active_policy(db_session, version=80, per_action_max_amount=2_000)
+
+    response = authorized_client.post(
+        "/v1/admin/simulate",
+        json={
+            "action_type": "refund",
+            "refund": {
+                "user_id": "user-sim-refund",
+                "refund_amount_cents": 1000,
+                "currency": "USD",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["action_type"] == "refund"
+    assert body["decision"] == "ALLOW"
+    assert body["policy_id"] == str(policy_id)
+    assert body["policy_version"] == 80
+
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_simulate_credit_with_active_policy(authorized_client: TestClient, db_session: Session) -> None:
+    policy_id = insert_active_policy(db_session, version=81, per_action_max_amount=2_000)
+
+    response = authorized_client.post(
+        "/v1/admin/simulate",
+        json={
+            "action_type": "credit_adjustment",
+            "credit": {
+                "user_id": "user-sim-credit",
+                "credit_amount_cents": 1000,
+                "currency": "USD",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["action_type"] == "credit_adjustment"
+    assert body["decision"] == "ALLOW"
+    assert body["policy_id"] == str(policy_id)
+    assert body["policy_version"] == 81
+
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_simulate_uses_explicit_policy_id_and_version(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    active_policy_id = insert_active_policy(db_session, version=82, per_action_max_amount=2_000)
+    explicit_policy_id = insert_active_policy(db_session, version=83, per_action_max_amount=500)
+
+    response = authorized_client.post(
+        "/v1/admin/simulate",
+        json={
+            "action_type": "refund",
+            "refund": {
+                "user_id": "user-sim-explicit",
+                "refund_amount_cents": 1000,
+                "currency": "USD",
+            },
+            "policy_id": str(explicit_policy_id),
+            "policy_version": 83,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["policy_id"] == str(explicit_policy_id)
+    assert body["policy_version"] == 83
+    assert body["decision"] == "BLOCK"
+
+    db_session.execute(delete(Policy).where(Policy.id.in_([active_policy_id, explicit_policy_id])))
+    db_session.commit()
+
+
+def test_simulate_exposure_override_can_trigger_escalate_or_block(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    policy_id = insert_active_policy(
+        db_session,
+        version=84,
+        per_action_max_amount=10_000,
+        daily_total_cap_amount=10_000,
+    )
+
+    escalate_response = authorized_client.post(
+        "/v1/admin/simulate",
+        json={
+            "action_type": "refund",
+            "refund": {
+                "user_id": "user-sim-override",
+                "refund_amount_cents": 1000,
+                "currency": "USD",
+            },
+            "exposure_override": {
+                "daily_total_amount_cents": 0,
+                "per_user_daily_count": 0,
+                "per_user_daily_amount_cents": 0,
+                "financial_total_amount_cents": 8500,
+            },
+        },
+    )
+    block_response = authorized_client.post(
+        "/v1/admin/simulate",
+        json={
+            "action_type": "refund",
+            "refund": {
+                "user_id": "user-sim-override",
+                "refund_amount_cents": 1000,
+                "currency": "USD",
+            },
+            "exposure_override": {
+                "daily_total_amount_cents": 0,
+                "per_user_daily_count": 0,
+                "per_user_daily_amount_cents": 0,
+                "financial_total_amount_cents": 9500,
+            },
+        },
+    )
+
+    assert escalate_response.status_code == 200
+    assert escalate_response.json()["decision"] == "ESCALATE"
+    assert block_response.status_code == 200
+    assert block_response.json()["decision"] == "BLOCK"
+
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_simulate_does_not_create_decision_events(authorized_client: TestClient, db_session: Session) -> None:
+    policy_id = insert_active_policy(db_session, version=85)
+
+    before_count = db_session.scalar(select(func.count()).select_from(DecisionEvent))
+    response = authorized_client.post(
+        "/v1/admin/simulate",
+        json={
+            "action_type": "refund",
+            "refund": {
+                "user_id": "user-sim-readonly",
+                "refund_amount_cents": 1000,
+                "currency": "USD",
+            },
+        },
+    )
+    after_count = db_session.scalar(select(func.count()).select_from(DecisionEvent))
+
+    assert response.status_code == 200
+    assert before_count == after_count
+
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
