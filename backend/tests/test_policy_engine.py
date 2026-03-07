@@ -13,11 +13,11 @@ def test_evaluate_action_allows_when_within_policy() -> None:
             per_user_daily_amount=Decimal("50.00"),
         ),
         policy=PolicyRules(
-            per_action_max_amount=Decimal("100.00"),
-            daily_total_cap_amount=Decimal("500.00"),
+            per_action_max_amount=10_000,
+            daily_total_cap_amount=50_000,
             per_user_daily_count_cap=5,
-            per_user_daily_amount_cap=Decimal("200.00"),
-            near_cap_escalation_ratio=Decimal("0.9"),
+            per_user_daily_amount_cap=20_000,
+            near_cap_escalation_ratio=0.9,
         ),
     )
 
@@ -36,11 +36,11 @@ def test_evaluate_action_escalates_when_near_cap() -> None:
             financial_total_amount_cents=8500,
         ),
         policy=PolicyRules(
-            per_action_max_amount=Decimal("100.00"),
-            daily_total_cap_amount=Decimal("100.00"),
+            per_action_max_amount=10_000,
+            daily_total_cap_amount=10_000,
             per_user_daily_count_cap=5,
-            per_user_daily_amount_cap=Decimal("200.00"),
-            near_cap_escalation_ratio=Decimal("0.9"),
+            per_user_daily_amount_cap=20_000,
+            near_cap_escalation_ratio=0.9,
         ),
     )
 
@@ -57,11 +57,11 @@ def test_evaluate_action_escalates_when_near_user_amount_cap() -> None:
             per_user_daily_amount=Decimal("75.00"),
         ),
         policy=PolicyRules(
-            per_action_max_amount=Decimal("100.00"),
-            daily_total_cap_amount=Decimal("500.00"),
+            per_action_max_amount=10_000,
+            daily_total_cap_amount=50_000,
             per_user_daily_count_cap=5,
-            per_user_daily_amount_cap=Decimal("100.00"),
-            near_cap_escalation_ratio=Decimal("0.9"),
+            per_user_daily_amount_cap=10_000,
+            near_cap_escalation_ratio=0.9,
         ),
     )
 
@@ -75,11 +75,11 @@ def test_evaluate_action_blocks_on_hard_violation() -> None:
         amount=Decimal("120.00"),
         exposure_context=ExposureContext(financial_total_amount_cents=40000),
         policy=PolicyRules(
-            per_action_max_amount=Decimal("200.00"),
-            daily_total_cap_amount=Decimal("500.00"),
+            per_action_max_amount=20_000,
+            daily_total_cap_amount=50_000,
             per_user_daily_count_cap=5,
-            per_user_daily_amount_cap=Decimal("500.00"),
-            near_cap_escalation_ratio=Decimal("0.9"),
+            per_user_daily_amount_cap=50_000,
+            near_cap_escalation_ratio=0.9,
         ),
     )
 

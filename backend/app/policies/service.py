@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import desc, func, select
@@ -33,7 +32,7 @@ def load_active_policy(db: Session) -> ActivePolicy:
                 daily_total_cap_amount=None,
                 per_user_daily_count_cap=None,
                 per_user_daily_amount_cap=None,
-                near_cap_escalation_ratio=Decimal("0.9"),
+                near_cap_escalation_ratio=0.9,
             ),
             base_reason_codes=["NO_ACTIVE_POLICY"],
         )

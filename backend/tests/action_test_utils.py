@@ -56,11 +56,11 @@ def insert_active_policy(
     db_session: Session,
     *,
     version: int,
-    per_action_max_amount: str = "100.00",
-    daily_total_cap_amount: str = "500.00",
+    per_action_max_amount: int = 10_000,
+    daily_total_cap_amount: int = 50_000,
     per_user_daily_count_cap: int = 5,
-    per_user_daily_amount_cap: str = "200.00",
-    near_cap_escalation_ratio: str = "0.9",
+    per_user_daily_amount_cap: int = 20_000,
+    near_cap_escalation_ratio: float = 0.9,
 ) -> uuid.UUID:
     policy_id = uuid.uuid4()
     db_session.add(

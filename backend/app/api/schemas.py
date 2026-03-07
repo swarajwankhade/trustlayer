@@ -1,5 +1,6 @@
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,6 +34,22 @@ class ActionDecisionResponse(BaseModel):
     reason_codes: list[str]
     policy_version: int | None = None
     model_version: str | None = None
+
+
+class CreatePolicyRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    version: int = Field(gt=0)
+    rules_json: dict[str, Any]
+    created_by: str = Field(min_length=1, max_length=255)
+
+
+class PolicyResponse(BaseModel):
+    id: UUID
+    name: str
+    version: int
+    status: str
+    rules_json: dict[str, Any]
+    created_by: str
 
 
 def cents_to_decimal(amount_cents: int) -> Decimal:

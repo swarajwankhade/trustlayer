@@ -130,7 +130,7 @@ def test_credit_policy_allows_and_blocks_by_amount(
     authorized_client: TestClient,
     db_session: Session,
 ) -> None:
-    policy_id = insert_active_policy(db_session, version=2, per_action_max_amount="20.00")
+    policy_id = insert_active_policy(db_session, version=2, per_action_max_amount=2_000)
 
     allow_response = authorized_client.post(
         "/v1/actions/credit",
@@ -178,9 +178,9 @@ def test_refund_and_credit_stack_against_combined_daily_cap(
     policy_id = insert_active_policy(
         db_session,
         version=5,
-        daily_total_cap_amount="100.00",
-        per_action_max_amount="200.00",
-        per_user_daily_amount_cap="200.00",
+        daily_total_cap_amount=10_000,
+        per_action_max_amount=20_000,
+        per_user_daily_amount_cap=20_000,
     )
 
     refund_response = authorized_client.post(

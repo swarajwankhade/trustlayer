@@ -4,11 +4,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class PolicyRules(BaseModel):
-    per_action_max_amount: Decimal | None = Field(default=None, gt=0)
-    daily_total_cap_amount: Decimal | None = Field(default=None, gt=0)
+    per_action_max_amount: int | None = Field(default=None, gt=0)
+    daily_total_cap_amount: int | None = Field(default=None, gt=0)
     per_user_daily_count_cap: int | None = Field(default=None, gt=0)
-    per_user_daily_amount_cap: Decimal | None = Field(default=None, gt=0)
-    near_cap_escalation_ratio: Decimal = Field(default=Decimal("0.9"), gt=0, le=1)
+    per_user_daily_amount_cap: int | None = Field(default=None, gt=0)
+    near_cap_escalation_ratio: float = Field(default=0.9, gt=0, le=1)
 
 
 class ExposureContext(BaseModel):
