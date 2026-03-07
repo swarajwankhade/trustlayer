@@ -81,5 +81,14 @@ class DecisionEventResponse(BaseModel):
     action_payload_json: dict[str, Any] | None
 
 
+class DecisionReplayResponse(BaseModel):
+    event_id: UUID
+    original_decision: str
+    original_reason_codes: list[str]
+    replayed_decision: str
+    replayed_reason_codes: list[str]
+    matches_original: bool
+
+
 def cents_to_decimal(amount_cents: int) -> Decimal:
     return (Decimal(amount_cents) / Decimal("100")).quantize(Decimal("0.01"))

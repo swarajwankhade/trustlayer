@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_api_key
@@ -183,3 +183,131 @@ def test_get_decisions_returns_and_filters(authorized_client: TestClient, db_ses
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))
     db_session.commit()
+
+
+def test_get_decision_detail_returns_expected_event(authorized_client: TestClient, db_session: Session) -> None:
+    _set_kill_switch(db_session, enabled=False, reason="normal", updated_by="pytest")
+    policy_id = insert_active_policy(db_session, version=60)
+    request_id = f"req-{uuid.uuid4()}"
+
+    create_response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": request_id,
+            "user_id": "user-detail",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 1000,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+    assert create_response.status_code == 200
+
+    event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    assert event is not None
+
+    detail_response = authorized_client.get(f"/v1/admin/decisions/{event.event_id}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["event_id"] == str(event.event_id)
+    assert detail_response.json()["request_id"] == request_id
+
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_replay_returns_matching_decision_and_does_not_create_new_event(
+    authorized_client: TestClient, db_session: Session
+) -> None:
+    _set_kill_switch(db_session, enabled=False, reason="normal", updated_by="pytest")
+    policy_id = insert_active_policy(db_session, version=61)
+    request_id = f"req-{uuid.uuid4()}"
+
+    create_response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": request_id,
+            "user_id": "user-replay",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 1000,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+    assert create_response.status_code == 200
+    event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    assert event is not None
+
+    before_count = db_session.scalar(select(func.count()).select_from(DecisionEvent))
+    replay_response = authorized_client.post(f"/v1/admin/decisions/{event.event_id}/replay")
+    after_count = db_session.scalar(select(func.count()).select_from(DecisionEvent))
+
+    assert replay_response.status_code == 200
+    assert replay_response.json()["event_id"] == str(event.event_id)
+    assert replay_response.json()["matches_original"] is True
+    assert replay_response.json()["original_decision"] == event.decision
+    assert replay_response.json()["replayed_decision"] == event.decision
+    assert before_count == after_count
+
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_replay_uses_stored_policy_version_not_current_active(
+    authorized_client: TestClient, db_session: Session
+) -> None:
+    _set_kill_switch(db_session, enabled=False, reason="normal", updated_by="pytest")
+    original_policy_id = insert_active_policy(
+        db_session,
+        version=70,
+        per_action_max_amount=2_000,
+        daily_total_cap_amount=50_000,
+    )
+    request_id = f"req-{uuid.uuid4()}"
+
+    create_response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": request_id,
+            "user_id": "user-policy-replay",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 1500,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+    assert create_response.status_code == 200
+    assert create_response.json()["decision"] == "ALLOW"
+    event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    assert event is not None
+
+    newer_policy_id = insert_active_policy(
+        db_session,
+        version=71,
+        per_action_max_amount=1_000,
+        daily_total_cap_amount=50_000,
+    )
+
+    replay_response = authorized_client.post(f"/v1/admin/decisions/{event.event_id}/replay")
+    assert replay_response.status_code == 200
+    assert replay_response.json()["matches_original"] is True
+    assert replay_response.json()["original_decision"] == "ALLOW"
+    assert replay_response.json()["replayed_decision"] == "ALLOW"
+
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id.in_([original_policy_id, newer_policy_id])))
+    db_session.commit()
+
+
+def test_decision_detail_and_replay_return_404_for_missing_event(authorized_client: TestClient) -> None:
+    missing_event_id = uuid.uuid4()
+
+    detail_response = authorized_client.get(f"/v1/admin/decisions/{missing_event_id}")
+    replay_response = authorized_client.post(f"/v1/admin/decisions/{missing_event_id}/replay")
+
+    assert detail_response.status_code == 404
+    assert replay_response.status_code == 404

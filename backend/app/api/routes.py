@@ -1,3 +1,4 @@
+from decimal import Decimal
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -14,6 +15,7 @@ from app.api.schemas import (
     CreditActionRequest,
     CreatePolicyRequest,
     DecisionEventResponse,
+    DecisionReplayResponse,
     KillSwitchResponse,
     KillSwitchUpdateRequest,
     PolicyResponse,
@@ -22,8 +24,9 @@ from app.api.schemas import (
 )
 from app.db.session import get_db_session
 from app.exposure.store import ExposureStore, get_exposure_store
-from app.models import DecisionEvent, KillSwitch, Policy
-from app.policies.schemas import PolicyRules
+from app.models import DecisionEvent, Policy
+from app.policies.engine import evaluate_action
+from app.policies.schemas import ExposureContext, PolicyRules
 
 router = APIRouter()
 v1_router = APIRouter(prefix="/v1", dependencies=[Depends(require_api_key)])
@@ -177,6 +180,78 @@ def list_decisions(
     return [DecisionEventResponse.model_validate(event, from_attributes=True) for event in events]
 
 
+@v1_router.get("/admin/decisions/{event_id}", response_model=DecisionEventResponse)
+def get_decision_detail(event_id: UUID, db: Session = Depends(get_db_session)) -> DecisionEventResponse:
+    event = db.get(DecisionEvent, event_id)
+    if event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Decision event not found")
+    return DecisionEventResponse.model_validate(event, from_attributes=True)
+
+
+@v1_router.post("/admin/decisions/{event_id}/replay", response_model=DecisionReplayResponse)
+def replay_decision(event_id: UUID, db: Session = Depends(get_db_session)) -> DecisionReplayResponse:
+    event = db.get(DecisionEvent, event_id)
+    if event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Decision event not found")
+
+    if event.policy_id is None or event.policy_version is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Stored decision does not reference a policy version",
+        )
+
+    policy = db.scalar(
+        select(Policy).where(Policy.id == event.policy_id, Policy.version == event.policy_version).limit(1)
+    )
+    if policy is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stored policy version referenced by decision was not found",
+        )
+
+    if event.action_payload_json is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Stored action payload is missing for replay",
+        )
+
+    try:
+        amount = _extract_amount_from_payload(event.action_type, event.action_payload_json)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Stored action payload is invalid for replay: {exc}",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    try:
+        policy_rules = PolicyRules.model_validate(policy.rules_json)
+        exposure_context = ExposureContext.model_validate(event.exposure_snapshot_json)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Stored policy or exposure snapshot is invalid for replay: {exc}",
+        ) from exc
+
+    replayed_decision, replayed_reason_codes, _ = evaluate_action(
+        amount=amount,
+        exposure_context=exposure_context,
+        policy=policy_rules,
+    )
+
+    return DecisionReplayResponse(
+        event_id=event.event_id,
+        original_decision=event.decision,
+        original_reason_codes=event.reason_codes,
+        replayed_decision=replayed_decision,
+        replayed_reason_codes=replayed_reason_codes,
+        matches_original=(
+            event.decision == replayed_decision and event.reason_codes == replayed_reason_codes
+        ),
+    )
+
+
 def _build_action_response(event: DecisionEvent) -> ActionDecisionResponse:
     return ActionDecisionResponse(
         request_id=event.request_id,
@@ -189,3 +264,13 @@ def _build_action_response(event: DecisionEvent) -> ActionDecisionResponse:
 
 def _serialize_payload(payload: BaseModel) -> dict[str, Any]:
     return payload.model_dump(mode="json")
+
+
+def _extract_amount_from_payload(action_type: str, payload: dict[str, Any]) -> Decimal:
+    if action_type == "refund":
+        parsed = RefundActionRequest.model_validate(payload)
+        return cents_to_decimal(parsed.refund_amount_cents)
+    if action_type == "credit_adjustment":
+        parsed = CreditActionRequest.model_validate(payload)
+        return cents_to_decimal(parsed.credit_amount_cents)
+    raise ValueError(f"Unsupported action_type for replay: {action_type}")
