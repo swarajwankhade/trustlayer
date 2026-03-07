@@ -1,43 +1,39 @@
 # TrustLayer
 
-AI Execution Control Plane for Refund Autonomy.
+AI Execution Control Plane for AI-initiated financial actions.
 
-## Task 1 setup
+TrustLayer sits between AI systems and real-world execution systems and decides whether an action should be:
 
-Start local dependencies:
+- ALLOW
+- ESCALATE
+- BLOCK
 
+Current MVP scope:
+
+- Refund authorization
+- Credit authorization
+- Deterministic policy engine
+- Exposure tracking with Redis
+- Immutable decision ledger in Postgres
+- Idempotent request handling
+- Kill switch for automation safety
+
+## Architecture
+
+TrustLayer follows this model:
+
+AI Systems → TrustLayer → Real-World Execution
+
+TrustLayer acts as a deterministic authorization boundary for probabilistic AI systems.
+
+## Current action endpoints
+
+- `POST /v1/actions/refund`
+- `POST /v1/actions/credit`
+
+## Local development
+
+### Start infrastructure
 ```bash
-docker compose -f infra/docker-compose.yml up -d
-```
-
-Install the backend environment:
-
-```bash
-uv sync --group dev
-```
-
-Run the API:
-
-```bash
-uv run uvicorn app.main:app --app-dir backend --reload
-```
-
-Run tests:
-
-```bash
-uv run pytest
-```
-
-## Database migrations
-
-Set the local database URL:
-
-```bash
-export DATABASE_URL=postgresql+psycopg://trustlayer:trustlayer@localhost:5432/trustlayer
-```
-
-Run migrations:
-
-```bash
-uv run alembic upgrade head
-```
+cd infra
+docker compose up -d
