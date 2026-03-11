@@ -12,6 +12,7 @@ class KillSwitch(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    observe_only: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_by: Mapped[str] = mapped_column(String(255), nullable=False)

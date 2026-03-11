@@ -39,6 +39,8 @@ def authorize_action(
             request_id=action.request_id,
             decision="ESCALATE",
             reason_codes=["KILL_SWITCH_ENABLED"],
+            would_decision=None,
+            would_reason_codes=None,
             model_version=action.model_version,
             policy_id=None,
             policy_version=None,
@@ -60,12 +62,13 @@ def authorize_action(
             user_id=action.user_id,
             date=decision_date,
         ).model_copy(update={"financial_total_amount_cents": financial_total_amount_cents})
-        decision, reason_codes, _risk_metrics = evaluate_action(
+        evaluated_decision, evaluated_reason_codes, _risk_metrics = evaluate_action(
             amount=action.amount,
             exposure_context=exposure_context,
             policy=active_policy.rules,
         )
-        if decision == "ALLOW":
+        actual_reason_codes = active_policy.base_reason_codes + evaluated_reason_codes
+        if not kill_switch.observe_only and evaluated_decision == "ALLOW":
             exposure_store.apply_allow(
                 action_type=action.action_type,
                 user_id=action.user_id,
@@ -78,14 +81,31 @@ def authorize_action(
             )
     except ExposureStoreUnavailableError:
         exposure_context = ExposureContext()
-        decision = "ESCALATE"
-        reason_codes = ["REDIS_UNAVAILABLE"]
+        evaluated_decision = "ESCALATE"
+        actual_reason_codes = active_policy.base_reason_codes + ["REDIS_UNAVAILABLE"]
+
+    if kill_switch.observe_only:
+        decision = "ALLOW"
+        reason_codes = ["OBSERVE_ONLY"]
+        if evaluated_decision == "BLOCK":
+            reason_codes.append("WOULD_BLOCK")
+        elif evaluated_decision == "ESCALATE":
+            reason_codes.append("WOULD_ESCALATE")
+        would_decision = evaluated_decision
+        would_reason_codes = actual_reason_codes
+    else:
+        decision = evaluated_decision
+        reason_codes = actual_reason_codes
+        would_decision = None
+        would_reason_codes = None
 
     decision_event = DecisionEvent(
         action_type=action.action_type,
         request_id=action.request_id,
         decision=decision,
-        reason_codes=active_policy.base_reason_codes + reason_codes,
+        reason_codes=reason_codes,
+        would_decision=would_decision,
+        would_reason_codes=would_reason_codes,
         model_version=action.model_version,
         policy_id=active_policy.policy_id,
         policy_version=active_policy.policy_version,
@@ -101,7 +121,13 @@ def authorize_action(
 def get_or_init_kill_switch(db: Session) -> KillSwitch:
     kill_switch = db.get(KillSwitch, 1)
     if kill_switch is None:
-        kill_switch = KillSwitch(id=1, enabled=False, reason="initial state", updated_by="system")
+        kill_switch = KillSwitch(
+            id=1,
+            enabled=False,
+            observe_only=False,
+            reason="initial state",
+            updated_by="system",
+        )
         db.add(kill_switch)
         db.commit()
         db.refresh(kill_switch)

@@ -55,6 +55,7 @@ class PolicyResponse(BaseModel):
 
 class KillSwitchUpdateRequest(BaseModel):
     enabled: bool
+    observe_only: bool
     reason: str = Field(min_length=1)
     updated_by: str = Field(min_length=1, max_length=255)
 
@@ -62,6 +63,7 @@ class KillSwitchUpdateRequest(BaseModel):
 class KillSwitchResponse(BaseModel):
     id: int
     enabled: bool
+    observe_only: bool
     reason: str | None
     updated_at: datetime
     updated_by: str
@@ -74,6 +76,8 @@ class DecisionEventResponse(BaseModel):
     request_id: str
     decision: str
     reason_codes: list[str]
+    would_decision: str | None
+    would_reason_codes: list[str] | None
     model_version: str | None
     policy_id: UUID | None
     policy_version: int | None
@@ -85,6 +89,8 @@ class DecisionReplayResponse(BaseModel):
     event_id: UUID
     original_decision: str
     original_reason_codes: list[str]
+    original_would_decision: str | None = None
+    original_would_reason_codes: list[str] | None = None
     replayed_decision: str
     replayed_reason_codes: list[str]
     matches_original: bool

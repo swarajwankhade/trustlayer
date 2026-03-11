@@ -46,6 +46,7 @@ def bootstrap_demo_data(
     kill_switch = get_or_init_kill_switch(db)
     if kill_switch.enabled:
         kill_switch.enabled = False
+        kill_switch.observe_only = False
         kill_switch.reason = "bootstrap reset to safe default"
         kill_switch.updated_by = created_by
         db.add(kill_switch)
@@ -100,6 +101,7 @@ def reset_dev_data(
 
     kill_switch = get_or_init_kill_switch(db)
     kill_switch.enabled = False
+    kill_switch.observe_only = False
     kill_switch.reason = "reset-dev-data"
     kill_switch.updated_by = updated_by
     db.add(kill_switch)

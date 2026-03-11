@@ -12,7 +12,7 @@ from app.api.dependencies import require_api_key
 from app.db.session import get_db_session, get_session_factory
 from app.exposure.store import get_exposure_store
 from app.main import app
-from app.models import DecisionEvent, Policy
+from app.models import DecisionEvent, KillSwitch, Policy
 from tests.action_test_utils import FakeExposureStore, insert_active_policy
 
 pytestmark = [
@@ -46,6 +46,32 @@ def authorized_client(db_session: Session, fake_exposure_store: FakeExposureStor
         yield TestClient(app)
     finally:
         app.dependency_overrides.clear()
+
+
+def _set_kill_switch(
+    db_session: Session,
+    *,
+    enabled: bool = False,
+    observe_only: bool = False,
+    reason: str = "pytest",
+    updated_by: str = "pytest",
+) -> None:
+    kill_switch = db_session.get(KillSwitch, 1)
+    if kill_switch is None:
+        kill_switch = KillSwitch(
+            id=1,
+            enabled=enabled,
+            observe_only=observe_only,
+            reason=reason,
+            updated_by=updated_by,
+        )
+    else:
+        kill_switch.enabled = enabled
+        kill_switch.observe_only = observe_only
+        kill_switch.reason = reason
+        kill_switch.updated_by = updated_by
+    db_session.add(kill_switch)
+    db_session.commit()
 
 
 def test_first_refund_call_persists_one_decision_event(
@@ -130,6 +156,131 @@ def test_refund_idempotent_request_replays_response(
     assert fake_exposure_store.daily_total_amounts["refund"] == Decimal("10.00")
     assert fake_exposure_store.per_user_daily_counts[("refund", "user-1")] == 1
     assert fake_exposure_store.financial_total_amount == Decimal("10.00")
+
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_observe_only_would_block_returns_allow_and_does_not_increment_exposure(
+    authorized_client: TestClient,
+    db_session: Session,
+    fake_exposure_store: FakeExposureStore,
+) -> None:
+    _set_kill_switch(db_session, enabled=False, observe_only=True, reason="observe", updated_by="pytest")
+    policy_id = insert_active_policy(db_session, version=9, per_action_max_amount=1_000)
+    request_id = f"req-{uuid.uuid4()}"
+
+    response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": request_id,
+            "user_id": "user-observe-block",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 1500,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "ALLOW"
+    assert "OBSERVE_ONLY" in response.json()["reason_codes"]
+    assert "WOULD_BLOCK" in response.json()["reason_codes"]
+    assert "refund" not in fake_exposure_store.daily_total_amounts
+    assert fake_exposure_store.financial_total_amount == Decimal("0.00")
+
+    event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    assert event is not None
+    assert event.decision == "ALLOW"
+    assert event.would_decision == "BLOCK"
+    assert event.would_reason_codes is not None
+    assert "PER_ACTION_MAX_AMOUNT_EXCEEDED" in event.would_reason_codes
+
+    _set_kill_switch(db_session, enabled=False, observe_only=False, reason="reset", updated_by="pytest")
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_observe_only_would_escalate_returns_allow_and_does_not_increment_exposure(
+    authorized_client: TestClient,
+    db_session: Session,
+    fake_exposure_store: FakeExposureStore,
+) -> None:
+    _set_kill_switch(db_session, enabled=False, observe_only=True, reason="observe", updated_by="pytest")
+    policy_id = insert_active_policy(
+        db_session,
+        version=10,
+        per_action_max_amount=10_000,
+        daily_total_cap_amount=10_000,
+    )
+    fake_exposure_store.financial_total_amount = Decimal("85.00")
+    request_id = f"req-{uuid.uuid4()}"
+
+    response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": request_id,
+            "user_id": "user-observe-escalate",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 1000,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "ALLOW"
+    assert "OBSERVE_ONLY" in response.json()["reason_codes"]
+    assert "WOULD_ESCALATE" in response.json()["reason_codes"]
+    assert fake_exposure_store.financial_total_amount == Decimal("85.00")
+    assert ("refund", "user-observe-escalate") not in fake_exposure_store.per_user_daily_counts
+
+    event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    assert event is not None
+    assert event.would_decision == "ESCALATE"
+    assert event.would_reason_codes is not None
+    assert "NEAR_DAILY_TOTAL_CAP" in event.would_reason_codes
+
+    _set_kill_switch(db_session, enabled=False, observe_only=False, reason="reset", updated_by="pytest")
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_normal_mode_refund_behavior_remains_unchanged(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    _set_kill_switch(db_session, enabled=False, observe_only=False, reason="normal", updated_by="pytest")
+    policy_id = insert_active_policy(db_session, version=11, per_action_max_amount=1_000)
+    request_id = f"req-{uuid.uuid4()}"
+
+    response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": request_id,
+            "user_id": "user-normal-block",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 1500,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "BLOCK"
+    assert "PER_ACTION_MAX_AMOUNT_EXCEEDED" in response.json()["reason_codes"]
+    assert "OBSERVE_ONLY" not in response.json()["reason_codes"]
+
+    event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    assert event is not None
+    assert event.would_decision is None
+    assert event.would_reason_codes is None
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))

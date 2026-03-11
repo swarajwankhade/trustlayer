@@ -144,6 +144,7 @@ def get_kill_switch(db: Session = Depends(get_db_session)) -> KillSwitchResponse
 def update_kill_switch(payload: KillSwitchUpdateRequest, db: Session = Depends(get_db_session)) -> KillSwitchResponse:
     kill_switch = get_or_init_kill_switch(db)
     kill_switch.enabled = payload.enabled
+    kill_switch.observe_only = payload.observe_only
     kill_switch.reason = payload.reason
     kill_switch.updated_by = payload.updated_by
     db.add(kill_switch)
@@ -242,16 +243,20 @@ def replay_decision(event_id: UUID, db: Session = Depends(get_db_session)) -> De
         exposure_context=exposure_context,
         policy=policy_rules,
     )
+    original_decision = event.would_decision if event.would_decision is not None else event.decision
+    original_reason_codes = (
+        event.would_reason_codes if event.would_reason_codes is not None else event.reason_codes
+    )
 
     return DecisionReplayResponse(
         event_id=event.event_id,
         original_decision=event.decision,
         original_reason_codes=event.reason_codes,
+        original_would_decision=event.would_decision,
+        original_would_reason_codes=event.would_reason_codes,
         replayed_decision=replayed_decision,
         replayed_reason_codes=replayed_reason_codes,
-        matches_original=(
-            event.decision == replayed_decision and event.reason_codes == replayed_reason_codes
-        ),
+        matches_original=(original_decision == replayed_decision and original_reason_codes == replayed_reason_codes),
     )
 
 

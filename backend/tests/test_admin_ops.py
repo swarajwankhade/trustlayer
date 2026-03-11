@@ -47,12 +47,26 @@ def authorized_client(db_session: Session, fake_exposure_store: FakeExposureStor
         app.dependency_overrides.clear()
 
 
-def _set_kill_switch(db_session: Session, *, enabled: bool, reason: str, updated_by: str) -> None:
+def _set_kill_switch(
+    db_session: Session,
+    *,
+    enabled: bool,
+    observe_only: bool = False,
+    reason: str,
+    updated_by: str,
+) -> None:
     kill_switch = db_session.get(KillSwitch, 1)
     if kill_switch is None:
-        kill_switch = KillSwitch(id=1, enabled=enabled, reason=reason, updated_by=updated_by)
+        kill_switch = KillSwitch(
+            id=1,
+            enabled=enabled,
+            observe_only=observe_only,
+            reason=reason,
+            updated_by=updated_by,
+        )
     else:
         kill_switch.enabled = enabled
+        kill_switch.observe_only = observe_only
         kill_switch.reason = reason
         kill_switch.updated_by = updated_by
     db_session.add(kill_switch)
@@ -66,6 +80,7 @@ def test_get_kill_switch_returns_current_state(authorized_client: TestClient, db
 
     assert response.status_code == 200
     assert response.json()["enabled"] is False
+    assert response.json()["observe_only"] is False
     assert response.json()["reason"] == "ops normal"
     assert response.json()["updated_by"] == "pytest"
 
@@ -75,17 +90,19 @@ def test_post_kill_switch_updates_state(authorized_client: TestClient, db_sessio
 
     response = authorized_client.post(
         "/v1/admin/killswitch",
-        json={"enabled": True, "reason": "incident", "updated_by": "ops-user"},
+        json={"enabled": True, "observe_only": True, "reason": "incident", "updated_by": "ops-user"},
     )
 
     assert response.status_code == 200
     assert response.json()["enabled"] is True
+    assert response.json()["observe_only"] is True
     assert response.json()["reason"] == "incident"
     assert response.json()["updated_by"] == "ops-user"
 
     stored = db_session.get(KillSwitch, 1)
     assert stored is not None
     assert stored.enabled is True
+    assert stored.observe_only is True
 
     _set_kill_switch(db_session, enabled=False, reason="reset", updated_by="pytest")
 
@@ -311,6 +328,53 @@ def test_decision_detail_and_replay_return_404_for_missing_event(authorized_clie
 
     assert detail_response.status_code == 404
     assert replay_response.status_code == 404
+
+
+def test_observe_only_decision_detail_and_replay_use_would_decision(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    policy_id = insert_active_policy(db_session, version=79, per_action_max_amount=1_000)
+    _set_kill_switch(db_session, enabled=False, observe_only=True, reason="observe mode", updated_by="ops-user")
+    request_id = f"req-{uuid.uuid4()}"
+
+    create_response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": request_id,
+            "user_id": "user-observe-detail",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 1500,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+    assert create_response.status_code == 200
+    assert create_response.json()["decision"] == "ALLOW"
+    assert "OBSERVE_ONLY" in create_response.json()["reason_codes"]
+    assert "WOULD_BLOCK" in create_response.json()["reason_codes"]
+
+    event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    assert event is not None
+
+    detail_response = authorized_client.get(f"/v1/admin/decisions/{event.event_id}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["decision"] == "ALLOW"
+    assert detail_response.json()["would_decision"] == "BLOCK"
+    assert "PER_ACTION_MAX_AMOUNT_EXCEEDED" in detail_response.json()["would_reason_codes"]
+
+    replay_response = authorized_client.post(f"/v1/admin/decisions/{event.event_id}/replay")
+    assert replay_response.status_code == 200
+    assert replay_response.json()["original_decision"] == "ALLOW"
+    assert replay_response.json()["original_would_decision"] == "BLOCK"
+    assert replay_response.json()["replayed_decision"] == "BLOCK"
+    assert replay_response.json()["matches_original"] is True
+
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+    _set_kill_switch(db_session, enabled=False, observe_only=False, reason="reset", updated_by="pytest")
 
 
 def test_simulate_refund_with_active_policy(authorized_client: TestClient, db_session: Session) -> None:
