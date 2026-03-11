@@ -1,5 +1,6 @@
+from collections import Counter
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -15,7 +16,9 @@ from app.api.schemas import (
     CreditActionRequest,
     CreatePolicyRequest,
     DecisionEventResponse,
+    DecisionMetricsResponse,
     DecisionReplayResponse,
+    ExposureMetricsResponse,
     KillSwitchResponse,
     KillSwitchUpdateRequest,
     PolicyResponse,
@@ -282,6 +285,62 @@ def simulate_action(payload: SimulationRequest, db: Session = Depends(get_db_ses
     )
 
 
+@v1_router.get("/admin/metrics/decisions", response_model=DecisionMetricsResponse)
+def get_decision_metrics(
+    action_type: str | None = None,
+    from_ts: datetime | None = Query(default=None, alias="from"),
+    to_ts: datetime | None = Query(default=None, alias="to"),
+    db: Session = Depends(get_db_session),
+) -> DecisionMetricsResponse:
+    query = select(DecisionEvent)
+    if action_type:
+        query = query.where(DecisionEvent.action_type == action_type)
+    if from_ts:
+        query = query.where(DecisionEvent.timestamp >= from_ts)
+    if to_ts:
+        query = query.where(DecisionEvent.timestamp <= to_ts)
+
+    events = db.scalars(query).all()
+
+    counts_by_action_type = Counter(event.action_type for event in events)
+    counts_by_reason_code: Counter[str] = Counter()
+    for event in events:
+        counts_by_reason_code.update(event.reason_codes)
+
+    return DecisionMetricsResponse(
+        total_decisions=len(events),
+        allow_count=sum(1 for event in events if event.decision == "ALLOW"),
+        escalate_count=sum(1 for event in events if event.decision == "ESCALATE"),
+        block_count=sum(1 for event in events if event.decision == "BLOCK"),
+        observe_only_count=sum(1 for event in events if "OBSERVE_ONLY" in event.reason_codes),
+        would_block_count=sum(1 for event in events if event.would_decision == "BLOCK"),
+        would_escalate_count=sum(1 for event in events if event.would_decision == "ESCALATE"),
+        counts_by_action_type=dict(counts_by_action_type),
+        counts_by_reason_code=dict(counts_by_reason_code),
+    )
+
+
+@v1_router.get("/admin/metrics/exposure", response_model=ExposureMetricsResponse)
+def get_exposure_metrics(
+    exposure_store: ExposureStore = Depends(get_exposure_store),
+) -> ExposureMetricsResponse:
+    date_bucket = datetime.now(timezone.utc).date()
+    refund_exposure = exposure_store.get_exposure(action_type="refund", user_id="metrics", date=date_bucket)
+    credit_exposure = exposure_store.get_exposure(
+        action_type="credit_adjustment",
+        user_id="metrics",
+        date=date_bucket,
+    )
+    financial_total_amount_cents = exposure_store.get_financial_total(date_bucket)
+
+    return ExposureMetricsResponse(
+        date_bucket_utc=date_bucket.isoformat(),
+        refund_daily_total_amount_cents=_decimal_to_cents(refund_exposure.daily_total_amount),
+        credit_daily_total_amount_cents=_decimal_to_cents(credit_exposure.daily_total_amount),
+        financial_total_amount_cents=financial_total_amount_cents,
+    )
+
+
 def _build_action_response(event: DecisionEvent) -> ActionDecisionResponse:
     return ActionDecisionResponse(
         request_id=event.request_id,
@@ -347,3 +406,7 @@ def _extract_simulation_amount(payload: SimulationRequest) -> Decimal:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="credit payload is required")
         return cents_to_decimal(payload.credit.credit_amount_cents)
     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported action_type")
+
+
+def _decimal_to_cents(amount: Decimal) -> int:
+    return int((amount * Decimal("100")).quantize(Decimal("1")))

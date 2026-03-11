@@ -152,5 +152,24 @@ class SimulationResponse(BaseModel):
     exposure_context_used: dict[str, Any]
 
 
+class DecisionMetricsResponse(BaseModel):
+    total_decisions: int
+    allow_count: int
+    escalate_count: int
+    block_count: int
+    observe_only_count: int
+    would_block_count: int
+    would_escalate_count: int
+    counts_by_action_type: dict[str, int]
+    counts_by_reason_code: dict[str, int]
+
+
+class ExposureMetricsResponse(BaseModel):
+    date_bucket_utc: str
+    refund_daily_total_amount_cents: int
+    credit_daily_total_amount_cents: int
+    financial_total_amount_cents: int
+
+
 def cents_to_decimal(amount_cents: int) -> Decimal:
     return (Decimal(amount_cents) / Decimal("100")).quantize(Decimal("0.01"))
