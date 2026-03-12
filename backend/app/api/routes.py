@@ -442,6 +442,47 @@ def admin_dashboard_ui() -> HTMLResponse:
         </section>
 
         <section class="card">
+          <h2>Export Decisions</h2>
+          <div class="form-grid">
+            <label>
+              action_type
+              <select id="exportActionType" class="input input-small">
+                <option value="">all</option>
+                <option value="refund">refund</option>
+                <option value="credit_adjustment">credit_adjustment</option>
+              </select>
+            </label>
+            <label>
+              decision
+              <select id="exportDecision" class="input input-small">
+                <option value="">all</option>
+                <option value="ALLOW">ALLOW</option>
+                <option value="ESCALATE">ESCALATE</option>
+                <option value="BLOCK">BLOCK</option>
+              </select>
+            </label>
+            <label>
+              from
+              <input id="exportFrom" class="input input-small" type="datetime-local" />
+            </label>
+            <label>
+              to
+              <input id="exportTo" class="input input-small" type="datetime-local" />
+            </label>
+            <label>
+              limit
+              <input id="exportLimit" class="input input-small" type="number" min="1" max="1000" step="1" value="100" />
+            </label>
+          </div>
+          <div class="toolbar" style="margin-top: 10px;">
+            <button id="exportDecisionsBtn" class="button">Export Decisions</button>
+            <button id="downloadExportBtn" class="button">Download JSON</button>
+          </div>
+          <div id="exportBanner" class="banner hidden"></div>
+          <pre id="exportResult">No export run yet.</pre>
+        </section>
+
+        <section class="card">
           <h2>Decision Detail</h2>
           <div id="detailBanner" class="banner hidden"></div>
           <pre id="decisionDetailResult">Select View from a recent decision row to inspect details.</pre>
@@ -466,15 +507,19 @@ def admin_dashboard_ui() -> HTMLResponse:
       const activatePolicyBtn = document.getElementById("activatePolicyBtn");
       const applyFiltersBtn = document.getElementById("applyFiltersBtn");
       const clearFiltersBtn = document.getElementById("clearFiltersBtn");
+      const exportDecisionsBtn = document.getElementById("exportDecisionsBtn");
+      const downloadExportBtn = document.getElementById("downloadExportBtn");
       const loadBanner = document.getElementById("loadBanner");
       const controlBanner = document.getElementById("controlBanner");
       const simulationBanner = document.getElementById("simulationBanner");
       const policyEditorBanner = document.getElementById("policyEditorBanner");
       const decisionFiltersBanner = document.getElementById("decisionFiltersBanner");
+      const exportBanner = document.getElementById("exportBanner");
       const detailBanner = document.getElementById("detailBanner");
       const replayBanner = document.getElementById("replayBanner");
       const simActionType = document.getElementById("simActionType");
       let createdPolicyId = null;
+      let latestExportData = null;
 
       function showBanner(node, message, ok) {
         node.textContent = message;
@@ -618,6 +663,79 @@ def admin_dashboard_ui() -> HTMLResponse:
 
         renderRecentDecisions(data || []);
         showBanner(decisionFiltersBanner, "Recent decisions updated.", true);
+      }
+
+      function buildExportQueryParams() {
+        const params = new URLSearchParams();
+        const actionType = document.getElementById("exportActionType").value;
+        const decision = document.getElementById("exportDecision").value;
+        const fromValue = document.getElementById("exportFrom").value;
+        const toValue = document.getElementById("exportTo").value;
+        const limitValue = parseOptionalInt("exportLimit");
+
+        if (actionType) params.set("action_type", actionType);
+        if (decision) params.set("decision", decision);
+        if (fromValue) params.set("from", new Date(fromValue).toISOString());
+        if (toValue) params.set("to", new Date(toValue).toISOString());
+        if (limitValue !== null) {
+          const normalized = Math.min(Math.max(limitValue, 1), 1000);
+          params.set("limit", String(normalized));
+        } else {
+          params.set("limit", "100");
+        }
+
+        return params;
+      }
+
+      async function exportDecisions() {
+        hideBanner(exportBanner);
+        const key = apiKeyInput.value.trim();
+        if (!key) {
+          showBanner(exportBanner, "API key is required to export decisions.", false);
+          return;
+        }
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+
+        document.getElementById("exportResult").textContent = "Loading exported decisions...";
+        const response = await fetch(`/v1/admin/decisions/export?${buildExportQueryParams().toString()}`, { headers: getHeaders() });
+        const data = await response.json();
+        if (!response.ok) {
+          const message = response.status === 401
+            ? "Invalid API key. Update the key and retry."
+            : `Export failed: ${JSON.stringify(data)}`;
+          showBanner(exportBanner, message, false);
+          latestExportData = null;
+          document.getElementById("exportResult").textContent = "Export failed.";
+          return;
+        }
+
+        latestExportData = data || [];
+        if (!latestExportData.length) {
+          showBanner(exportBanner, "Export completed with no matching results.", true);
+          document.getElementById("exportResult").textContent = "No decision events found for the selected filters.";
+          return;
+        }
+
+        showBanner(exportBanner, `Exported ${latestExportData.length} decision event(s).`, true);
+        document.getElementById("exportResult").textContent = JSON.stringify(latestExportData, null, 2);
+      }
+
+      function downloadExportJson() {
+        hideBanner(exportBanner);
+        if (!latestExportData) {
+          showBanner(exportBanner, "No export data available. Run Export Decisions first.", false);
+          return;
+        }
+        const payload = JSON.stringify(latestExportData, null, 2);
+        const blob = new Blob([payload], { type: "application/json" });
+        const link = document.createElement("a");
+        const timestamp = new Date().toISOString().replaceAll(":", "-");
+        link.href = URL.createObjectURL(blob);
+        link.download = `trustlayer-decisions-export-${timestamp}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
       }
 
       function toggleSimulationFields() {
@@ -1053,6 +1171,8 @@ def admin_dashboard_ui() -> HTMLResponse:
       validatePolicyBtn.addEventListener("click", validatePolicy);
       createPolicyBtn.addEventListener("click", createPolicy);
       activatePolicyBtn.addEventListener("click", activatePolicy);
+      exportDecisionsBtn.addEventListener("click", exportDecisions);
+      downloadExportBtn.addEventListener("click", downloadExportJson);
       applyFiltersBtn.addEventListener("click", async () => {
         const key = apiKeyInput.value.trim();
         if (!key) {
