@@ -187,6 +187,31 @@ def list_decisions(
     return [DecisionEventResponse.model_validate(event, from_attributes=True) for event in events]
 
 
+@v1_router.get("/admin/decisions/export", response_model=list[DecisionEventResponse])
+def export_decisions(
+    action_type: str | None = None,
+    decision: str | None = None,
+    from_ts: datetime | None = Query(default=None, alias="from"),
+    to_ts: datetime | None = Query(default=None, alias="to"),
+    limit: int = 100,
+    db: Session = Depends(get_db_session),
+) -> list[DecisionEventResponse]:
+    normalized_limit = min(max(limit, 1), 1000)
+    query = select(DecisionEvent)
+
+    if action_type:
+        query = query.where(DecisionEvent.action_type == action_type)
+    if decision:
+        query = query.where(DecisionEvent.decision == decision)
+    if from_ts:
+        query = query.where(DecisionEvent.timestamp >= from_ts)
+    if to_ts:
+        query = query.where(DecisionEvent.timestamp <= to_ts)
+
+    events = db.scalars(query.order_by(desc(DecisionEvent.timestamp)).limit(normalized_limit)).all()
+    return [DecisionEventResponse.model_validate(event, from_attributes=True) for event in events]
+
+
 @v1_router.get("/admin/decisions/{event_id}", response_model=DecisionEventResponse)
 def get_decision_detail(event_id: UUID, db: Session = Depends(get_db_session)) -> DecisionEventResponse:
     event = db.get(DecisionEvent, event_id)
