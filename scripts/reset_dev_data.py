@@ -21,10 +21,13 @@ def main() -> int:
     settings = get_settings()
     session_factory = get_session_factory()
 
+    print("Resetting local TrustLayer dev/demo data...")
+    print(f"redis_url={settings.redis_url} updated_by={args.updated_by}")
+
     with session_factory() as db:
         result = reset_dev_data(db, redis_url=settings.redis_url, updated_by=args.updated_by)
 
-    print("Reset complete")
+    print("Reset complete.")
     print(f"decision_events_deleted={result.decision_events_deleted}")
     print(f"policies_deleted={result.policies_deleted}")
     print(f"redis_keys_deleted={result.redis_keys_deleted}")

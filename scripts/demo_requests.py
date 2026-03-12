@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from urllib import request
+from urllib import error, request
 
 BASE_URL = os.getenv("TRUSTLAYER_BASE_URL", "http://127.0.0.1:8000")
 API_KEY = os.getenv("API_KEY", "dev-api-key")
@@ -24,6 +24,8 @@ def post(path: str, payload: dict) -> tuple[int, dict]:
 
 
 def main() -> int:
+    print(f"Running TrustLayer demo requests against {BASE_URL}")
+
     refund_req = {
         "request_id": f"demo-refund-{uuid.uuid4()}",
         "user_id": "demo-user-1",
@@ -79,10 +81,15 @@ def main() -> int:
         try:
             code, body = post(path, payload)
             print(f"{label}: status={code} decision={body.get('decision')} reason_codes={body.get('reason_codes')}")
+        except error.HTTPError as exc:
+            response_body = exc.read().decode("utf-8")
+            print(f"{label}: failed status={exc.code} body={response_body}")
+            return 1
         except Exception as exc:
             print(f"{label}: failed ({exc})")
             return 1
 
+    print("Demo flow complete.")
     return 0
 
 

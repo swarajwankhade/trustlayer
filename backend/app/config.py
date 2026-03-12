@@ -6,6 +6,7 @@ from os import getenv
 class Settings:
     app_env: str = field(default_factory=lambda: getenv("APP_ENV", "development"))
     app_name: str = field(default_factory=lambda: getenv("APP_NAME", "TrustLayer"))
+    service_version: str = field(default_factory=lambda: getenv("SERVICE_VERSION", "0.1.0"))
     api_host: str = field(default_factory=lambda: getenv("API_HOST", "0.0.0.0"))
     api_port: int = field(default_factory=lambda: int(getenv("API_PORT", "8000")))
     database_url: str | None = field(default_factory=lambda: getenv("DATABASE_URL"))

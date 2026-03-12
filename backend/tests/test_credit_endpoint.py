@@ -35,7 +35,13 @@ def fake_exposure_store() -> FakeExposureStore:
 
 
 @pytest.fixture
-def authorized_client(db_session: Session, fake_exposure_store: FakeExposureStore) -> Iterator[TestClient]:
+def authorized_client(
+    db_session: Session,
+    fake_exposure_store: FakeExposureStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[TestClient]:
+    monkeypatch.setenv("ACTION_RATE_LIMIT_PER_MINUTE", "100000")
+
     def override_db_session() -> Iterator[Session]:
         yield db_session
 

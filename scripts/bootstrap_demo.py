@@ -19,6 +19,9 @@ def main() -> int:
     args = parser.parse_args()
 
     session_factory = get_session_factory()
+    print("Seeding TrustLayer demo bootstrap data...")
+    print(f"activate_policy={not args.no_activate} created_by={args.created_by}")
+
     with session_factory() as db:
         result = bootstrap_demo_data(
             db,
@@ -26,12 +29,13 @@ def main() -> int:
             created_by=args.created_by,
         )
 
-    print("Bootstrap complete")
+    print("Bootstrap complete.")
     print(f"created_kill_switch={result.created_kill_switch}")
     print(f"created_policy={result.created_policy}")
     print(f"activated_policy={result.activated_policy}")
     print(f"policy_id={result.policy_id}")
     print(f"policy_version={result.policy_version}")
+    print("Next: start API and run scripts/demo_requests.py")
     return 0
 
 

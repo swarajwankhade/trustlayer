@@ -51,6 +51,14 @@ def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@router.get("/version")
+def version() -> dict[str, str]:
+    return {
+        "service": "trustlayer",
+        "version": get_settings().service_version,
+    }
+
+
 @router.get("/ready")
 def readiness() -> JSONResponse:
     postgres = "ok" if _postgres_ready() else "error"
