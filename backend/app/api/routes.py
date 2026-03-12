@@ -357,12 +357,25 @@ def admin_dashboard_ui() -> HTMLResponse:
                 <th>decision</th>
                 <th>would_decision</th>
                 <th>reason_codes</th>
+                <th>actions (View / Replay)</th>
               </tr>
             </thead>
             <tbody id="recentDecisionsBody">
-              <tr><td colspan="5" class="muted">No data loaded yet.</td></tr>
+              <tr><td colspan="6" class="muted">No data loaded yet.</td></tr>
             </tbody>
           </table>
+        </section>
+
+        <section class="card">
+          <h2>Decision Detail</h2>
+          <div id="detailBanner" class="banner hidden"></div>
+          <pre id="decisionDetailResult">Select View from a recent decision row to inspect details.</pre>
+        </section>
+
+        <section class="card">
+          <h2>Replay Result</h2>
+          <div id="replayBanner" class="banner hidden"></div>
+          <pre id="decisionReplayResult">Select Replay from a recent decision row to run deterministic replay.</pre>
         </section>
       </div>
     </div>
@@ -376,6 +389,8 @@ def admin_dashboard_ui() -> HTMLResponse:
       const loadBanner = document.getElementById("loadBanner");
       const controlBanner = document.getElementById("controlBanner");
       const simulationBanner = document.getElementById("simulationBanner");
+      const detailBanner = document.getElementById("detailBanner");
+      const replayBanner = document.getElementById("replayBanner");
       const simActionType = document.getElementById("simActionType");
 
       function showBanner(node, message, ok) {
@@ -466,7 +481,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         const tbody = document.getElementById("recentDecisionsBody");
         tbody.innerHTML = "";
         if (!items.length) {
-          tbody.innerHTML = '<tr><td colspan="5" class="muted">No recent decisions available.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" class="muted">No recent decisions available.</td></tr>';
           return;
         }
 
@@ -482,7 +497,10 @@ def admin_dashboard_ui() -> HTMLResponse:
             <td><span class="${decisionClass}">${item.decision}</span></td>
             <td>${item.would_decision ? `<span class="${wouldDecisionClass}">${item.would_decision}</span>` : "-"}</td>
             <td>${reasonCodes}</td>
+            <td><button class="button" data-action="view">View</button> <button class="button" data-action="replay">Replay</button></td>
           `;
+          tr.querySelector('[data-action="view"]').addEventListener("click", () => loadDecisionDetail(item.event_id));
+          tr.querySelector('[data-action="replay"]').addEventListener("click", () => replayDecision(item.event_id));
           tbody.appendChild(tr);
         }
       }
@@ -621,7 +639,72 @@ def admin_dashboard_ui() -> HTMLResponse:
         renderMetricGrid("decisionMetricsGrid", [["total_decisions", "..."]]);
         renderMetricGrid("exposureMetricsGrid", [["financial_total_amount_cents", "..."]]);
         const tbody = document.getElementById("recentDecisionsBody");
-        tbody.innerHTML = '<tr><td colspan="5" class="muted">Loading recent decisions...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="muted">Loading recent decisions...</td></tr>';
+      }
+
+      async function loadDecisionDetail(eventId) {
+        hideBanner(detailBanner);
+        document.getElementById("decisionDetailResult").textContent = "Loading decision detail...";
+        const response = await fetch(`/v1/admin/decisions/${eventId}`, { headers: getHeaders() });
+        const data = await response.json();
+        if (!response.ok) {
+          const message = response.status === 401
+            ? "Invalid API key. Update the key and retry."
+            : `Failed to load decision detail: ${JSON.stringify(data)}`;
+          showBanner(detailBanner, message, false);
+          document.getElementById("decisionDetailResult").textContent = "Decision detail unavailable.";
+          return;
+        }
+
+        const formatted = {
+          event_id: data.event_id,
+          timestamp: data.timestamp,
+          action_type: data.action_type,
+          request_id: data.request_id,
+          decision: data.decision,
+          reason_codes: data.reason_codes,
+          would_decision: data.would_decision,
+          would_reason_codes: data.would_reason_codes,
+          policy_id: data.policy_id,
+          policy_version: data.policy_version,
+          exposure_snapshot_json: data.exposure_snapshot_json,
+          action_payload_json: data.action_payload_json,
+        };
+        document.getElementById("decisionDetailResult").textContent = JSON.stringify(formatted, null, 2);
+        showBanner(detailBanner, "Decision detail loaded.", true);
+      }
+
+      async function replayDecision(eventId) {
+        hideBanner(replayBanner);
+        document.getElementById("decisionReplayResult").textContent = "Running replay...";
+        const response = await fetch(`/v1/admin/decisions/${eventId}/replay`, {
+          method: "POST",
+          headers: getHeaders(),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          const message = response.status === 401
+            ? "Invalid API key. Update the key and retry."
+            : `Replay failed: ${JSON.stringify(data)}`;
+          showBanner(replayBanner, message, false);
+          document.getElementById("decisionReplayResult").textContent = "Replay result unavailable.";
+          return;
+        }
+
+        const formatted = {
+          event_id: data.event_id,
+          original_decision: data.original_decision,
+          replayed_decision: data.replayed_decision,
+          matches_original: data.matches_original,
+          original_reason_codes: data.original_reason_codes,
+          replayed_reason_codes: data.replayed_reason_codes,
+        };
+        document.getElementById("decisionReplayResult").textContent = JSON.stringify(formatted, null, 2);
+        showBanner(
+          replayBanner,
+          data.matches_original ? "Replay matched original decision." : "Replay differs from original decision.",
+          data.matches_original
+        );
       }
 
       async function refreshDashboard() {
