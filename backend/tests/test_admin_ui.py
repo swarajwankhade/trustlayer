@@ -23,6 +23,10 @@ def test_admin_dashboard_ui_includes_key_sections(client: TestClient) -> None:
     assert "Run Simulation" in html
     assert "refund_amount_cents" in html
     assert "credit_amount_cents" in html
+    assert "Policy Editor" in html
+    assert "Validate Policy" in html
+    assert "Create Policy" in html
+    assert "Activate Policy" in html
     assert "View / Replay" in html
     assert "Decision Detail" in html
     assert "Replay Result" in html

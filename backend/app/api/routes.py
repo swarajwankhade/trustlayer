@@ -262,6 +262,53 @@ def admin_dashboard_ui() -> HTMLResponse:
         </section>
 
         <section class="card">
+          <h2>Policy Editor</h2>
+          <p class="section-note">Validate, create, and activate policies using existing admin APIs.</p>
+          <div class="form-grid">
+            <label>
+              policy_name
+              <input id="policyName" class="input input-small" type="text" placeholder="demo_policy" />
+            </label>
+            <label>
+              policy_version
+              <input id="policyVersion" class="input input-small" type="number" min="1" step="1" placeholder="1" />
+            </label>
+            <label>
+              per_action_max_amount
+              <input id="policyPerActionMax" class="input input-small" type="number" min="1" step="1" placeholder="10000" />
+            </label>
+            <label>
+              daily_total_cap_amount
+              <input id="policyDailyTotalCap" class="input input-small" type="number" min="1" step="1" placeholder="20000" />
+            </label>
+            <label>
+              per_user_daily_count_cap
+              <input id="policyPerUserCountCap" class="input input-small" type="number" min="1" step="1" placeholder="10" />
+            </label>
+            <label>
+              per_user_daily_amount_cap
+              <input id="policyPerUserAmountCap" class="input input-small" type="number" min="1" step="1" placeholder="20000" />
+            </label>
+            <label>
+              near_cap_escalation_ratio
+              <input id="policyNearCapRatio" class="input input-small" type="number" min="0" max="1" step="0.01" value="0.9" />
+            </label>
+            <label>
+              activate_policy_id (optional override)
+              <input id="activatePolicyId" class="input input-small" type="text" placeholder="uuid" />
+            </label>
+          </div>
+          <div class="toolbar" style="margin-top: 10px;">
+            <button id="validatePolicyBtn" class="button">Validate Policy</button>
+            <button id="createPolicyBtn" class="button">Create Policy</button>
+            <button id="activatePolicyBtn" class="button">Activate Policy</button>
+          </div>
+          <div id="policyEditorBanner" class="banner hidden"></div>
+          <div id="policyEditorState" class="muted">No policy created in this session yet.</div>
+          <pre id="policyValidationResult">Validation result will appear here.</pre>
+        </section>
+
+        <section class="card">
           <h2>Decision Metrics</h2>
           <div id="decisionMetricsGrid" class="metrics"></div>
           <div class="grid" style="margin-top: 10px;">
@@ -386,12 +433,17 @@ def admin_dashboard_ui() -> HTMLResponse:
       const refreshBtn = document.getElementById("refreshBtn");
       const applyControlsBtn = document.getElementById("applyControlsBtn");
       const runSimulationBtn = document.getElementById("runSimulationBtn");
+      const validatePolicyBtn = document.getElementById("validatePolicyBtn");
+      const createPolicyBtn = document.getElementById("createPolicyBtn");
+      const activatePolicyBtn = document.getElementById("activatePolicyBtn");
       const loadBanner = document.getElementById("loadBanner");
       const controlBanner = document.getElementById("controlBanner");
       const simulationBanner = document.getElementById("simulationBanner");
+      const policyEditorBanner = document.getElementById("policyEditorBanner");
       const detailBanner = document.getElementById("detailBanner");
       const replayBanner = document.getElementById("replayBanner");
       const simActionType = document.getElementById("simActionType");
+      let createdPolicyId = null;
 
       function showBanner(node, message, ok) {
         node.textContent = message;
@@ -630,6 +682,161 @@ def admin_dashboard_ui() -> HTMLResponse:
         renderSimulationResult(data);
       }
 
+      function parseRequiredPositiveInt(inputId, fieldName) {
+        const parsed = parseOptionalInt(inputId);
+        if (parsed === null || parsed <= 0) {
+          throw new Error(`${fieldName} must be a positive integer.`);
+        }
+        return parsed;
+      }
+
+      function buildPolicyPayload() {
+        const name = document.getElementById("policyName").value.trim();
+        const version = parseRequiredPositiveInt("policyVersion", "policy_version");
+        const rulesJson = {
+          per_action_max_amount: parseRequiredPositiveInt("policyPerActionMax", "per_action_max_amount"),
+          daily_total_cap_amount: parseRequiredPositiveInt("policyDailyTotalCap", "daily_total_cap_amount"),
+          per_user_daily_count_cap: parseRequiredPositiveInt("policyPerUserCountCap", "per_user_daily_count_cap"),
+          per_user_daily_amount_cap: parseRequiredPositiveInt("policyPerUserAmountCap", "per_user_daily_amount_cap"),
+          near_cap_escalation_ratio: Number.parseFloat(document.getElementById("policyNearCapRatio").value),
+        };
+
+        if (!name) {
+          throw new Error("policy_name is required.");
+        }
+        if (!Number.isFinite(rulesJson.near_cap_escalation_ratio)) {
+          throw new Error("near_cap_escalation_ratio must be a valid number.");
+        }
+        if (rulesJson.near_cap_escalation_ratio < 0 || rulesJson.near_cap_escalation_ratio > 1) {
+          throw new Error("near_cap_escalation_ratio must be between 0 and 1.");
+        }
+
+        return {
+          name: name,
+          version: version,
+          rules_json: rulesJson,
+          created_by: document.getElementById("updatedBy").value.trim() || "operator-ui",
+        };
+      }
+
+      async function validatePolicy() {
+        hideBanner(policyEditorBanner);
+        const key = apiKeyInput.value.trim();
+        if (!key) {
+          showBanner(policyEditorBanner, "API key is required to validate policy.", false);
+          return;
+        }
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+
+        let payload;
+        try {
+          payload = buildPolicyPayload();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Invalid policy input.";
+          showBanner(policyEditorBanner, message, false);
+          return;
+        }
+
+        document.getElementById("policyValidationResult").textContent = "Validating policy...";
+        const response = await fetch("/v1/admin/policies/validate", {
+          method: "POST",
+          headers: getHeaders(),
+          body: JSON.stringify({ rules_json: payload.rules_json }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          const message = response.status === 401
+            ? "Invalid API key. Update the key and retry."
+            : `Policy validation failed: ${JSON.stringify(data)}`;
+          showBanner(policyEditorBanner, message, false);
+          document.getElementById("policyValidationResult").textContent = "Validation failed.";
+          return;
+        }
+
+        const validationOutput = {
+          valid: data.valid,
+          errors: data.errors || [],
+          warnings: data.warnings || [],
+        };
+        document.getElementById("policyValidationResult").textContent = JSON.stringify(validationOutput, null, 2);
+        showBanner(
+          policyEditorBanner,
+          data.valid ? "Policy validation: valid." : "Policy validation: invalid. Review errors below.",
+          data.valid
+        );
+      }
+
+      async function createPolicy() {
+        hideBanner(policyEditorBanner);
+        const key = apiKeyInput.value.trim();
+        if (!key) {
+          showBanner(policyEditorBanner, "API key is required to create policy.", false);
+          return;
+        }
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+
+        let payload;
+        try {
+          payload = buildPolicyPayload();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Invalid policy input.";
+          showBanner(policyEditorBanner, message, false);
+          return;
+        }
+
+        const response = await fetch("/v1/admin/policies", {
+          method: "POST",
+          headers: getHeaders(),
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          const message = response.status === 401
+            ? "Invalid API key. Update the key and retry."
+            : `Policy creation failed: ${JSON.stringify(data)}`;
+          showBanner(policyEditorBanner, message, false);
+          return;
+        }
+
+        createdPolicyId = data.id;
+        document.getElementById("activatePolicyId").value = createdPolicyId;
+        document.getElementById("policyEditorState").textContent = `Created policy_id: ${createdPolicyId}`;
+        showBanner(policyEditorBanner, `Policy created successfully. policy_id=${createdPolicyId}`, true);
+      }
+
+      async function activatePolicy() {
+        hideBanner(policyEditorBanner);
+        const key = apiKeyInput.value.trim();
+        if (!key) {
+          showBanner(policyEditorBanner, "API key is required to activate policy.", false);
+          return;
+        }
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+
+        const manualPolicyId = document.getElementById("activatePolicyId").value.trim();
+        const policyId = manualPolicyId || createdPolicyId;
+        if (!policyId) {
+          showBanner(policyEditorBanner, "No policy_id available. Create a policy first or provide activate_policy_id.", false);
+          return;
+        }
+
+        const response = await fetch(`/v1/admin/policies/${policyId}/activate`, {
+          method: "POST",
+          headers: getHeaders(),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          const message = response.status === 401
+            ? "Invalid API key. Update the key and retry."
+            : `Policy activation failed: ${JSON.stringify(data)}`;
+          showBanner(policyEditorBanner, message, false);
+          return;
+        }
+
+        showBanner(policyEditorBanner, `Policy activated successfully. policy_id=${data.id}`, true);
+        await refreshDashboard();
+      }
+
       function setLoadingState() {
         document.getElementById("runtimeText").textContent = "Loading runtime controls...";
         document.getElementById("activePolicyState").textContent = "Loading policy...";
@@ -779,6 +986,9 @@ def admin_dashboard_ui() -> HTMLResponse:
       refreshBtn.addEventListener("click", refreshDashboard);
       applyControlsBtn.addEventListener("click", applyControls);
       runSimulationBtn.addEventListener("click", runSimulation);
+      validatePolicyBtn.addEventListener("click", validatePolicy);
+      createPolicyBtn.addEventListener("click", createPolicy);
+      activatePolicyBtn.addEventListener("click", activatePolicy);
       simActionType.addEventListener("change", toggleSimulationFields);
       toggleSimulationFields();
 
