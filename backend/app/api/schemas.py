@@ -44,6 +44,16 @@ class CreatePolicyRequest(BaseModel):
     created_by: str = Field(min_length=1, max_length=255)
 
 
+class ValidatePolicyRequest(BaseModel):
+    rules_json: dict[str, Any]
+
+
+class ValidatePolicyResponse(BaseModel):
+    valid: bool
+    errors: list[str]
+    warnings: list[str]
+
+
 class PolicyResponse(BaseModel):
     id: UUID
     name: str

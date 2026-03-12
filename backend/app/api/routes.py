@@ -28,6 +28,8 @@ from app.api.schemas import (
     RefundActionRequest,
     SimulationRequest,
     SimulationResponse,
+    ValidatePolicyRequest,
+    ValidatePolicyResponse,
     cents_to_decimal,
 )
 from app.db.session import get_db_session
@@ -112,6 +114,16 @@ def create_policy(payload: CreatePolicyRequest, db: Session = Depends(get_db_ses
     db.commit()
     db.refresh(policy)
     return PolicyResponse.model_validate(policy, from_attributes=True)
+
+
+@v1_router.post("/admin/policies/validate", response_model=ValidatePolicyResponse)
+def validate_policy(payload: ValidatePolicyRequest) -> ValidatePolicyResponse:
+    try:
+        PolicyRules.model_validate(payload.rules_json)
+        return ValidatePolicyResponse(valid=True, errors=[], warnings=[])
+    except ValidationError as exc:
+        errors = [f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}" for err in exc.errors()]
+        return ValidatePolicyResponse(valid=False, errors=errors, warnings=[])
 
 
 @v1_router.post("/admin/policies/{policy_id}/activate", response_model=PolicyResponse)
