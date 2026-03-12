@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 from redis import Redis
 from sqlalchemy import desc, select, update
@@ -72,6 +72,162 @@ def readiness() -> JSONResponse:
             "postgres": postgres,
             "redis": redis,
         },
+    )
+
+
+@router.get("/admin", response_class=HTMLResponse)
+def admin_dashboard_ui() -> HTMLResponse:
+    return HTMLResponse(
+        """
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TrustLayer Operator Dashboard</title>
+    <style>
+      body { font-family: sans-serif; margin: 24px; line-height: 1.4; }
+      h1, h2 { margin-bottom: 8px; }
+      section { margin-bottom: 20px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; }
+      label { display: inline-block; margin-right: 10px; }
+      input[type="text"] { min-width: 260px; }
+      pre { background: #f7f7f7; padding: 10px; border-radius: 6px; overflow: auto; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid #eee; text-align: left; padding: 6px; font-size: 14px; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+      .muted { color: #666; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>TrustLayer Operator Dashboard</h1>
+    <p class="muted">Uses <code>/v1/admin/dashboard</code> and <code>/v1/admin/killswitch</code>. Provide API key below.</p>
+
+    <section>
+      <div class="row">
+        <label>API Key <input id="apiKey" type="text" placeholder="X-API-Key" /></label>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Runtime Controls</h2>
+      <div id="runtimeControls"></div>
+      <div class="row">
+        <label><input id="killEnabled" type="checkbox" /> Kill Switch Enabled</label>
+        <label><input id="observeOnly" type="checkbox" /> Observe Only</label>
+      </div>
+      <div class="row">
+        <label>Reason <input id="reason" type="text" value="updated from /admin UI" /></label>
+        <label>Updated By <input id="updatedBy" type="text" value="operator-ui" /></label>
+        <button id="applyControlsBtn">Apply Controls</button>
+      </div>
+      <div id="controlStatus" class="muted"></div>
+    </section>
+
+    <section>
+      <h2>Active Policy</h2>
+      <pre id="activePolicy">loading...</pre>
+    </section>
+
+    <section>
+      <h2>Decision Metrics Summary</h2>
+      <pre id="decisionMetrics">loading...</pre>
+    </section>
+
+    <section>
+      <h2>Exposure Metrics</h2>
+      <pre id="exposureMetrics">loading...</pre>
+    </section>
+
+    <section>
+      <h2>Recent Decisions</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>timestamp</th>
+            <th>action_type</th>
+            <th>decision</th>
+            <th>would_decision</th>
+            <th>reason_codes</th>
+          </tr>
+        </thead>
+        <tbody id="recentDecisionsBody"></tbody>
+      </table>
+    </section>
+
+    <script>
+      const apiKeyInput = document.getElementById("apiKey");
+      const refreshBtn = document.getElementById("refreshBtn");
+      const applyControlsBtn = document.getElementById("applyControlsBtn");
+
+      function getHeaders() {
+        const key = apiKeyInput.value.trim();
+        if (!key) return { "Content-Type": "application/json" };
+        return { "Content-Type": "application/json", "X-API-Key": key };
+      }
+
+      function renderRecentDecisions(items) {
+        const tbody = document.getElementById("recentDecisionsBody");
+        tbody.innerHTML = "";
+        for (const item of items) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${item.timestamp}</td>
+            <td>${item.action_type}</td>
+            <td>${item.decision}</td>
+            <td>${item.would_decision || ""}</td>
+            <td>${(item.reason_codes || []).join(", ")}</td>
+          `;
+          tbody.appendChild(tr);
+        }
+      }
+
+      async function refreshDashboard() {
+        const response = await fetch("/v1/admin/dashboard", { headers: getHeaders() });
+        const data = await response.json();
+        if (!response.ok) {
+          alert(`Failed to load dashboard: ${JSON.stringify(data)}`);
+          return;
+        }
+
+        document.getElementById("runtimeControls").textContent = JSON.stringify(data.runtime_controls, null, 2);
+        document.getElementById("activePolicy").textContent = JSON.stringify(data.active_policy, null, 2);
+        document.getElementById("decisionMetrics").textContent = JSON.stringify(data.decision_metrics, null, 2);
+        document.getElementById("exposureMetrics").textContent = JSON.stringify(data.exposure_metrics, null, 2);
+        renderRecentDecisions(data.recent_decisions || []);
+
+        document.getElementById("killEnabled").checked = !!data.runtime_controls.kill_switch_enabled;
+        document.getElementById("observeOnly").checked = !!data.runtime_controls.observe_only;
+      }
+
+      async function applyControls() {
+        const payload = {
+          enabled: document.getElementById("killEnabled").checked,
+          observe_only: document.getElementById("observeOnly").checked,
+          reason: document.getElementById("reason").value || "updated from /admin UI",
+          updated_by: document.getElementById("updatedBy").value || "operator-ui",
+        };
+
+        const response = await fetch("/v1/admin/killswitch", {
+          method: "POST",
+          headers: getHeaders(),
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          document.getElementById("controlStatus").textContent = `Update failed: ${JSON.stringify(data)}`;
+          return;
+        }
+        document.getElementById("controlStatus").textContent = "Runtime controls updated.";
+        await refreshDashboard();
+      }
+
+      refreshBtn.addEventListener("click", refreshDashboard);
+      applyControlsBtn.addEventListener("click", applyControls);
+    </script>
+  </body>
+</html>
+        """
     )
 
 
