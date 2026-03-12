@@ -86,79 +86,232 @@ def admin_dashboard_ui() -> HTMLResponse:
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>TrustLayer Operator Dashboard</title>
     <style>
-      body { font-family: sans-serif; margin: 24px; line-height: 1.4; }
-      h1, h2 { margin-bottom: 8px; }
-      section { margin-bottom: 20px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; }
-      label { display: inline-block; margin-right: 10px; }
-      input[type="text"] { min-width: 260px; }
-      pre { background: #f7f7f7; padding: 10px; border-radius: 6px; overflow: auto; }
-      table { width: 100%; border-collapse: collapse; }
-      th, td { border-bottom: 1px solid #eee; text-align: left; padding: 6px; font-size: 14px; }
-      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-      .muted { color: #666; font-size: 13px; }
+      :root {
+        --bg: #f5f7fa;
+        --surface: #ffffff;
+        --border: #dbe2ea;
+        --text: #1d2734;
+        --muted: #5d6b7a;
+        --good: #1f7a45;
+        --warn: #b96d00;
+        --bad: #b42318;
+        --chip-bg: #eef3f8;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .container { max-width: 1200px; margin: 0 auto; }
+      h1 { margin: 0 0 8px; font-size: 28px; }
+      h2 { margin: 0 0 12px; font-size: 18px; }
+      .subtitle { margin: 0 0 20px; color: var(--muted); }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 14px;
+      }
+      .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+      .input {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 14px;
+        min-width: 240px;
+      }
+      .button {
+        border: 1px solid var(--border);
+        background: #f8fafc;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      .button:hover { background: #eef3f8; }
+      .button-primary {
+        background: #12467f;
+        color: #ffffff;
+        border-color: #12467f;
+      }
+      .button-primary:hover { background: #0e3764; }
+      .banner {
+        margin-top: 10px;
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        font-size: 14px;
+      }
+      .banner-ok {
+        background: #eaf8ee;
+        border-color: #b9e5c7;
+        color: var(--good);
+      }
+      .banner-error {
+        background: #fff2f0;
+        border-color: #f6c6bf;
+        color: var(--bad);
+      }
+      .hidden { display: none; }
+      .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+      .chip {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--chip-bg);
+        color: #2b3a4a;
+        font-size: 12px;
+        border: 1px solid var(--border);
+      }
+      .chip-good { background: #eaf8ee; color: var(--good); border-color: #b9e5c7; }
+      .chip-warn { background: #fff7ea; color: var(--warn); border-color: #f3ddb2; }
+      .chip-bad { background: #fff2f0; color: var(--bad); border-color: #f6c6bf; }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 10px;
+      }
+      .metric {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+      }
+      .metric .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+      .metric .value { font-size: 20px; font-weight: 600; }
+      pre {
+        margin: 0;
+        background: #f7f9fc;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        overflow-x: auto;
+        font-size: 12px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      th, td {
+        padding: 8px;
+        border-bottom: 1px solid #edf1f5;
+        text-align: left;
+        vertical-align: top;
+      }
+      th { color: var(--muted); font-weight: 600; }
+      .muted { color: var(--muted); }
+      .stack { display: grid; gap: 14px; margin-top: 14px; }
+      .inline-controls { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
     </style>
   </head>
   <body>
-    <h1>TrustLayer Operator Dashboard</h1>
-    <p class="muted">Uses <code>/v1/admin/dashboard</code> and <code>/v1/admin/killswitch</code>. Provide API key below.</p>
+    <div class="container">
+      <h1>TrustLayer Operator Dashboard</h1>
+      <p class="subtitle">Operational snapshot from <code>/v1/admin/dashboard</code> with runtime controls from <code>/v1/admin/killswitch</code>.</p>
 
-    <section>
-      <div class="row">
-        <label>API Key <input id="apiKey" type="text" placeholder="X-API-Key" /></label>
-        <button id="refreshBtn">Refresh</button>
+      <section class="card">
+        <div class="toolbar">
+          <label>
+            API Key
+            <input id="apiKey" class="input" type="password" placeholder="X-API-Key" />
+          </label>
+          <button id="refreshBtn" class="button button-primary">Refresh Dashboard</button>
+          <span class="muted">Stored in local browser localStorage for demo convenience.</span>
+        </div>
+        <div id="loadBanner" class="banner hidden"></div>
+      </section>
+
+      <div class="stack">
+        <section class="card">
+          <h2>Runtime Controls</h2>
+          <div class="chips" id="runtimeChips"></div>
+          <div id="runtimeText" class="muted">Waiting for data.</div>
+          <div class="inline-controls">
+            <label><input id="killEnabled" type="checkbox" /> Kill Switch Enabled</label>
+            <label><input id="observeOnly" type="checkbox" /> Observe Only</label>
+          </div>
+          <div class="toolbar">
+            <label>Reason <input id="reason" class="input" type="text" value="updated from /admin UI" /></label>
+            <label>Updated By <input id="updatedBy" class="input" type="text" value="operator-ui" /></label>
+            <button id="applyControlsBtn" class="button">Apply Controls</button>
+          </div>
+          <div id="controlBanner" class="banner hidden"></div>
+        </section>
+
+        <section class="card">
+          <h2>Active Policy</h2>
+          <div id="policyBadges" class="chips"></div>
+          <div id="activePolicyState" class="muted">Waiting for data.</div>
+          <pre id="activePolicyRules">{}</pre>
+        </section>
+
+        <section class="card">
+          <h2>Decision Metrics</h2>
+          <div id="decisionMetricsGrid" class="metrics"></div>
+          <div class="grid" style="margin-top: 10px;">
+            <div>
+              <h3>By Action Type</h3>
+              <pre id="byActionType">{}</pre>
+            </div>
+            <div>
+              <h3>By Reason Code</h3>
+              <pre id="byReasonCode">{}</pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Exposure Metrics</h2>
+          <div id="exposureMetricsGrid" class="metrics"></div>
+        </section>
+
+        <section class="card">
+          <h2>Recent Decisions</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>timestamp</th>
+                <th>action_type</th>
+                <th>decision</th>
+                <th>would_decision</th>
+                <th>reason_codes</th>
+              </tr>
+            </thead>
+            <tbody id="recentDecisionsBody">
+              <tr><td colspan="5" class="muted">No data loaded yet.</td></tr>
+            </tbody>
+          </table>
+        </section>
       </div>
-    </section>
-
-    <section>
-      <h2>Runtime Controls</h2>
-      <div id="runtimeControls"></div>
-      <div class="row">
-        <label><input id="killEnabled" type="checkbox" /> Kill Switch Enabled</label>
-        <label><input id="observeOnly" type="checkbox" /> Observe Only</label>
-      </div>
-      <div class="row">
-        <label>Reason <input id="reason" type="text" value="updated from /admin UI" /></label>
-        <label>Updated By <input id="updatedBy" type="text" value="operator-ui" /></label>
-        <button id="applyControlsBtn">Apply Controls</button>
-      </div>
-      <div id="controlStatus" class="muted"></div>
-    </section>
-
-    <section>
-      <h2>Active Policy</h2>
-      <pre id="activePolicy">loading...</pre>
-    </section>
-
-    <section>
-      <h2>Decision Metrics Summary</h2>
-      <pre id="decisionMetrics">loading...</pre>
-    </section>
-
-    <section>
-      <h2>Exposure Metrics</h2>
-      <pre id="exposureMetrics">loading...</pre>
-    </section>
-
-    <section>
-      <h2>Recent Decisions</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>timestamp</th>
-            <th>action_type</th>
-            <th>decision</th>
-            <th>would_decision</th>
-            <th>reason_codes</th>
-          </tr>
-        </thead>
-        <tbody id="recentDecisionsBody"></tbody>
-      </table>
-    </section>
+    </div>
 
     <script>
+      const API_KEY_STORAGE_KEY = "trustlayer_admin_api_key";
       const apiKeyInput = document.getElementById("apiKey");
       const refreshBtn = document.getElementById("refreshBtn");
       const applyControlsBtn = document.getElementById("applyControlsBtn");
+      const loadBanner = document.getElementById("loadBanner");
+      const controlBanner = document.getElementById("controlBanner");
+
+      function showBanner(node, message, ok) {
+        node.textContent = message;
+        node.classList.remove("hidden", "banner-ok", "banner-error");
+        node.classList.add(ok ? "banner-ok" : "banner-error");
+      }
+
+      function hideBanner(node) {
+        node.classList.add("hidden");
+        node.textContent = "";
+        node.classList.remove("banner-ok", "banner-error");
+      }
 
       function getHeaders() {
         const key = apiKeyInput.value.trim();
@@ -166,34 +319,150 @@ def admin_dashboard_ui() -> HTMLResponse:
         return { "Content-Type": "application/json", "X-API-Key": key };
       }
 
+      function chipClassForDecision(value) {
+        if (value === "ALLOW") return "chip chip-good";
+        if (value === "ESCALATE") return "chip chip-warn";
+        if (value === "BLOCK") return "chip chip-bad";
+        return "chip";
+      }
+
+      function renderMetricGrid(nodeId, metrics) {
+        const container = document.getElementById(nodeId);
+        container.innerHTML = "";
+        for (const [label, value] of metrics) {
+          const card = document.createElement("div");
+          card.className = "metric";
+          card.innerHTML = `<div class="label">${label}</div><div class="value">${value}</div>`;
+          container.appendChild(card);
+        }
+      }
+
+      function renderRuntimeControls(runtime) {
+        const chips = document.getElementById("runtimeChips");
+        chips.innerHTML = "";
+        const killChip = document.createElement("span");
+        killChip.className = runtime.kill_switch_enabled ? "chip chip-bad" : "chip chip-good";
+        killChip.textContent = runtime.kill_switch_enabled ? "Kill Switch: Enabled" : "Kill Switch: Disabled";
+        chips.appendChild(killChip);
+
+        const observeChip = document.createElement("span");
+        observeChip.className = runtime.observe_only ? "chip chip-warn" : "chip";
+        observeChip.textContent = runtime.observe_only ? "Observe Only: Enabled" : "Observe Only: Disabled";
+        chips.appendChild(observeChip);
+
+        document.getElementById("runtimeText").textContent =
+          `Reason: ${runtime.reason || "n/a"} | Updated by: ${runtime.updated_by || "n/a"} | Updated at: ${runtime.updated_at || "n/a"}`;
+      }
+
+      function renderActivePolicy(policy) {
+        const badges = document.getElementById("policyBadges");
+        const state = document.getElementById("activePolicyState");
+        const rules = document.getElementById("activePolicyRules");
+        badges.innerHTML = "";
+
+        if (!policy) {
+          state.textContent = "No active policy found.";
+          rules.textContent = "{}";
+          return;
+        }
+
+        const statusChip = document.createElement("span");
+        statusChip.className = policy.status === "ACTIVE" ? "chip chip-good" : "chip";
+        statusChip.textContent = `Status: ${policy.status}`;
+        badges.appendChild(statusChip);
+
+        const nameChip = document.createElement("span");
+        nameChip.className = "chip";
+        nameChip.textContent = `Name: ${policy.name}`;
+        badges.appendChild(nameChip);
+
+        const versionChip = document.createElement("span");
+        versionChip.className = "chip";
+        versionChip.textContent = `Version: ${policy.version}`;
+        badges.appendChild(versionChip);
+
+        state.textContent = `Policy ID: ${policy.policy_id}`;
+        rules.textContent = JSON.stringify(policy.rules_json || {}, null, 2);
+      }
+
       function renderRecentDecisions(items) {
         const tbody = document.getElementById("recentDecisionsBody");
         tbody.innerHTML = "";
-        for (const item of items) {
+        if (!items.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="muted">No recent decisions available.</td></tr>';
+          return;
+        }
+
+        const sorted = [...items].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        for (const item of sorted) {
           const tr = document.createElement("tr");
+          const reasonCodes = (item.reason_codes || []).join(", ") || "-";
+          const decisionClass = chipClassForDecision(item.decision);
+          const wouldDecisionClass = chipClassForDecision(item.would_decision);
           tr.innerHTML = `
             <td>${item.timestamp}</td>
             <td>${item.action_type}</td>
-            <td>${item.decision}</td>
-            <td>${item.would_decision || ""}</td>
-            <td>${(item.reason_codes || []).join(", ")}</td>
+            <td><span class="${decisionClass}">${item.decision}</span></td>
+            <td>${item.would_decision ? `<span class="${wouldDecisionClass}">${item.would_decision}</span>` : "-"}</td>
+            <td>${reasonCodes}</td>
           `;
           tbody.appendChild(tr);
         }
       }
 
+      function setLoadingState() {
+        document.getElementById("runtimeText").textContent = "Loading runtime controls...";
+        document.getElementById("activePolicyState").textContent = "Loading policy...";
+        document.getElementById("activePolicyRules").textContent = "{}";
+        document.getElementById("byActionType").textContent = "{}";
+        document.getElementById("byReasonCode").textContent = "{}";
+        renderMetricGrid("decisionMetricsGrid", [["total_decisions", "..."]]);
+        renderMetricGrid("exposureMetricsGrid", [["financial_total_amount_cents", "..."]]);
+        const tbody = document.getElementById("recentDecisionsBody");
+        tbody.innerHTML = '<tr><td colspan="5" class="muted">Loading recent decisions...</td></tr>';
+      }
+
       async function refreshDashboard() {
-        const response = await fetch("/v1/admin/dashboard", { headers: getHeaders() });
-        const data = await response.json();
-        if (!response.ok) {
-          alert(`Failed to load dashboard: ${JSON.stringify(data)}`);
+        hideBanner(controlBanner);
+        hideBanner(loadBanner);
+        const key = apiKeyInput.value.trim();
+        if (!key) {
+          showBanner(loadBanner, "API key is required to load dashboard data.", false);
           return;
         }
 
-        document.getElementById("runtimeControls").textContent = JSON.stringify(data.runtime_controls, null, 2);
-        document.getElementById("activePolicy").textContent = JSON.stringify(data.active_policy, null, 2);
-        document.getElementById("decisionMetrics").textContent = JSON.stringify(data.decision_metrics, null, 2);
-        document.getElementById("exposureMetrics").textContent = JSON.stringify(data.exposure_metrics, null, 2);
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+        setLoadingState();
+        const response = await fetch("/v1/admin/dashboard", { headers: getHeaders() });
+        const data = await response.json();
+        if (!response.ok) {
+          const message = response.status === 401
+            ? "Invalid API key. Update the key and refresh."
+            : `Failed to load dashboard: ${JSON.stringify(data)}`;
+          showBanner(loadBanner, message, false);
+          return;
+        }
+        showBanner(loadBanner, "Dashboard data loaded.", true);
+
+        renderRuntimeControls(data.runtime_controls);
+        renderActivePolicy(data.active_policy);
+        renderMetricGrid("decisionMetricsGrid", [
+          ["total_decisions", data.decision_metrics.total_decisions],
+          ["allow_count", data.decision_metrics.allow_count],
+          ["escalate_count", data.decision_metrics.escalate_count],
+          ["block_count", data.decision_metrics.block_count],
+          ["observe_only_count", data.decision_metrics.observe_only_count],
+          ["would_block_count", data.decision_metrics.would_block_count],
+          ["would_escalate_count", data.decision_metrics.would_escalate_count]
+        ]);
+        renderMetricGrid("exposureMetricsGrid", [
+          ["date_bucket_utc", data.exposure_metrics.date_bucket_utc],
+          ["refund_daily_total_amount_cents", data.exposure_metrics.refund_daily_total_amount_cents],
+          ["credit_daily_total_amount_cents", data.exposure_metrics.credit_daily_total_amount_cents],
+          ["financial_total_amount_cents", data.exposure_metrics.financial_total_amount_cents]
+        ]);
+        document.getElementById("byActionType").textContent = JSON.stringify(data.decision_metrics.counts_by_action_type || {}, null, 2);
+        document.getElementById("byReasonCode").textContent = JSON.stringify(data.decision_metrics.counts_by_reason_code || {}, null, 2);
         renderRecentDecisions(data.recent_decisions || []);
 
         document.getElementById("killEnabled").checked = !!data.runtime_controls.kill_switch_enabled;
@@ -215,15 +484,21 @@ def admin_dashboard_ui() -> HTMLResponse:
         });
         const data = await response.json();
         if (!response.ok) {
-          document.getElementById("controlStatus").textContent = `Update failed: ${JSON.stringify(data)}`;
+          showBanner(controlBanner, `Failed to update controls: ${JSON.stringify(data)}`, false);
           return;
         }
-        document.getElementById("controlStatus").textContent = "Runtime controls updated.";
+        showBanner(controlBanner, "Runtime controls updated successfully.", true);
         await refreshDashboard();
       }
 
       refreshBtn.addEventListener("click", refreshDashboard);
       applyControlsBtn.addEventListener("click", applyControls);
+
+      const savedApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+      if (savedApiKey) {
+        apiKeyInput.value = savedApiKey;
+        refreshDashboard();
+      }
     </script>
   </body>
 </html>

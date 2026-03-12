@@ -14,6 +14,8 @@ def test_admin_dashboard_ui_includes_key_sections(client: TestClient) -> None:
     html = response.text
     assert "Runtime Controls" in html
     assert "Active Policy" in html
-    assert "Decision Metrics Summary" in html
+    assert "Decision Metrics" in html
     assert "Exposure Metrics" in html
     assert "Recent Decisions" in html
+    assert "Refresh Dashboard" in html
+    assert "Apply Controls" in html
