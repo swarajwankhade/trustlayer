@@ -210,6 +210,14 @@ def admin_dashboard_ui() -> HTMLResponse:
       .muted { color: var(--muted); }
       .stack { display: grid; gap: 14px; margin-top: 14px; }
       .inline-controls { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px;
+      }
+      .form-grid label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+      .input-small { min-width: 0; width: 100%; }
+      .section-note { color: var(--muted); margin-top: 0; margin-bottom: 10px; }
     </style>
   </head>
   <body>
@@ -274,6 +282,72 @@ def admin_dashboard_ui() -> HTMLResponse:
         </section>
 
         <section class="card">
+          <h2>Simulation</h2>
+          <p class="section-note">Dry-run evaluator call via <code>POST /v1/admin/simulate</code>. No decision event or exposure mutation.</p>
+          <div class="form-grid">
+            <label>
+              Action Type
+              <select id="simActionType" class="input input-small">
+                <option value="refund">refund</option>
+                <option value="credit_adjustment">credit_adjustment</option>
+              </select>
+            </label>
+            <label>
+              User ID
+              <input id="simUserId" class="input input-small" type="text" placeholder="user_123" />
+            </label>
+            <label id="simRefundAmountWrap">
+              Refund Amount (cents)
+              <input id="simRefundAmount" class="input input-small" type="number" min="1" step="1" placeholder="1000" />
+            </label>
+            <label id="simCreditAmountWrap" class="hidden">
+              Credit Amount (cents)
+              <input id="simCreditAmount" class="input input-small" type="number" min="1" step="1" placeholder="1000" />
+            </label>
+            <label>
+              Currency
+              <input id="simCurrency" class="input input-small" type="text" value="USD" maxlength="3" />
+            </label>
+            <label>
+              Ticket ID (optional)
+              <input id="simTicketId" class="input input-small" type="text" placeholder="ticket_001" />
+            </label>
+            <label id="simCreditTypeWrap" class="hidden">
+              Credit Type (optional)
+              <input id="simCreditType" class="input input-small" type="text" placeholder="goodwill" />
+            </label>
+            <label>
+              Model Version (optional)
+              <input id="simModelVersion" class="input input-small" type="text" placeholder="model-v1" />
+            </label>
+          </div>
+          <h3>Exposure Overrides (optional)</h3>
+          <div class="form-grid">
+            <label>
+              financial_total_amount_cents
+              <input id="simFinancialTotal" class="input input-small" type="number" min="0" step="1" />
+            </label>
+            <label>
+              daily_total_amount_cents
+              <input id="simDailyTotal" class="input input-small" type="number" min="0" step="1" />
+            </label>
+            <label>
+              per_user_daily_count
+              <input id="simPerUserCount" class="input input-small" type="number" min="0" step="1" />
+            </label>
+            <label>
+              per_user_daily_amount_cents
+              <input id="simPerUserAmount" class="input input-small" type="number" min="0" step="1" />
+            </label>
+          </div>
+          <div class="toolbar" style="margin-top: 10px;">
+            <button id="runSimulationBtn" class="button">Run Simulation</button>
+          </div>
+          <div id="simulationBanner" class="banner hidden"></div>
+          <pre id="simulationResult">No simulation run yet.</pre>
+        </section>
+
+        <section class="card">
           <h2>Recent Decisions</h2>
           <table>
             <thead>
@@ -298,8 +372,11 @@ def admin_dashboard_ui() -> HTMLResponse:
       const apiKeyInput = document.getElementById("apiKey");
       const refreshBtn = document.getElementById("refreshBtn");
       const applyControlsBtn = document.getElementById("applyControlsBtn");
+      const runSimulationBtn = document.getElementById("runSimulationBtn");
       const loadBanner = document.getElementById("loadBanner");
       const controlBanner = document.getElementById("controlBanner");
+      const simulationBanner = document.getElementById("simulationBanner");
+      const simActionType = document.getElementById("simActionType");
 
       function showBanner(node, message, ok) {
         node.textContent = message;
@@ -410,6 +487,131 @@ def admin_dashboard_ui() -> HTMLResponse:
         }
       }
 
+      function toggleSimulationFields() {
+        const isRefund = simActionType.value === "refund";
+        document.getElementById("simRefundAmountWrap").classList.toggle("hidden", !isRefund);
+        document.getElementById("simCreditAmountWrap").classList.toggle("hidden", isRefund);
+        document.getElementById("simCreditTypeWrap").classList.toggle("hidden", isRefund);
+      }
+
+      function parseOptionalInt(inputId) {
+        const raw = document.getElementById(inputId).value.trim();
+        if (!raw) return null;
+        const parsed = Number.parseInt(raw, 10);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+
+      function buildSimulationPayload() {
+        const actionType = simActionType.value;
+        const userId = document.getElementById("simUserId").value.trim();
+        const currency = document.getElementById("simCurrency").value.trim().toUpperCase();
+        const ticketId = document.getElementById("simTicketId").value.trim();
+        const modelVersion = document.getElementById("simModelVersion").value.trim();
+
+        if (!userId) {
+          throw new Error("user_id is required.");
+        }
+        if (!currency || currency.length !== 3) {
+          throw new Error("currency must be a 3-letter code.");
+        }
+
+        const payload = { action_type: actionType };
+        if (actionType === "refund") {
+          const amount = parseOptionalInt("simRefundAmount");
+          if (amount === null || amount <= 0) {
+            throw new Error("refund_amount_cents must be a positive integer.");
+          }
+          payload.refund = {
+            user_id: userId,
+            refund_amount_cents: amount,
+            currency: currency,
+          };
+          if (ticketId) payload.refund.ticket_id = ticketId;
+          if (modelVersion) payload.refund.model_version = modelVersion;
+        } else {
+          const amount = parseOptionalInt("simCreditAmount");
+          const creditType = document.getElementById("simCreditType").value.trim();
+          if (amount === null || amount <= 0) {
+            throw new Error("credit_amount_cents must be a positive integer.");
+          }
+          payload.credit = {
+            user_id: userId,
+            credit_amount_cents: amount,
+            currency: currency,
+          };
+          if (creditType) payload.credit.credit_type = creditType;
+          if (ticketId) payload.credit.ticket_id = ticketId;
+          if (modelVersion) payload.credit.model_version = modelVersion;
+        }
+
+        const exposureOverride = {};
+        const financialTotal = parseOptionalInt("simFinancialTotal");
+        const dailyTotal = parseOptionalInt("simDailyTotal");
+        const perUserCount = parseOptionalInt("simPerUserCount");
+        const perUserAmount = parseOptionalInt("simPerUserAmount");
+
+        if (financialTotal !== null) exposureOverride.financial_total_amount_cents = financialTotal;
+        if (dailyTotal !== null) exposureOverride.daily_total_amount_cents = dailyTotal;
+        if (perUserCount !== null) exposureOverride.per_user_daily_count = perUserCount;
+        if (perUserAmount !== null) exposureOverride.per_user_daily_amount_cents = perUserAmount;
+
+        if (Object.keys(exposureOverride).length > 0) {
+          payload.exposure_override = exposureOverride;
+        }
+        return payload;
+      }
+
+      function renderSimulationResult(result) {
+        const output = {
+          action_type: result.action_type,
+          decision: result.decision,
+          reason_codes: result.reason_codes,
+          policy_id: result.policy_id,
+          policy_version: result.policy_version,
+          exposure_context_used: result.exposure_context_used,
+        };
+        document.getElementById("simulationResult").textContent = JSON.stringify(output, null, 2);
+      }
+
+      async function runSimulation() {
+        hideBanner(simulationBanner);
+        const key = apiKeyInput.value.trim();
+        if (!key) {
+          showBanner(simulationBanner, "API key is required to run simulation.", false);
+          return;
+        }
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+
+        let payload;
+        try {
+          payload = buildSimulationPayload();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Invalid simulation input.";
+          showBanner(simulationBanner, message, false);
+          return;
+        }
+
+        showBanner(simulationBanner, "Running simulation...", true);
+        document.getElementById("simulationResult").textContent = "Loading simulation result...";
+        const response = await fetch("/v1/admin/simulate", {
+          method: "POST",
+          headers: getHeaders(),
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          const message = response.status === 401
+            ? "Invalid API key. Update the key and retry simulation."
+            : `Simulation failed: ${JSON.stringify(data)}`;
+          showBanner(simulationBanner, message, false);
+          document.getElementById("simulationResult").textContent = "No simulation result.";
+          return;
+        }
+
+        showBanner(simulationBanner, "Simulation completed.", true);
+        renderSimulationResult(data);
+      }
+
       function setLoadingState() {
         document.getElementById("runtimeText").textContent = "Loading runtime controls...";
         document.getElementById("activePolicyState").textContent = "Loading policy...";
@@ -493,6 +695,9 @@ def admin_dashboard_ui() -> HTMLResponse:
 
       refreshBtn.addEventListener("click", refreshDashboard);
       applyControlsBtn.addEventListener("click", applyControls);
+      runSimulationBtn.addEventListener("click", runSimulation);
+      simActionType.addEventListener("change", toggleSimulationFields);
+      toggleSimulationFields();
 
       const savedApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
       if (savedApiKey) {

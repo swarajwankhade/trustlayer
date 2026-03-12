@@ -19,3 +19,7 @@ def test_admin_dashboard_ui_includes_key_sections(client: TestClient) -> None:
     assert "Recent Decisions" in html
     assert "Refresh Dashboard" in html
     assert "Apply Controls" in html
+    assert "Simulation" in html
+    assert "Run Simulation" in html
+    assert "refund_amount_cents" in html
+    assert "credit_amount_cents" in html
