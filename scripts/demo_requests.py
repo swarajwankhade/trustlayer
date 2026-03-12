@@ -7,7 +7,7 @@ import uuid
 from urllib import error, request
 
 BASE_URL = os.getenv("TRUSTLAYER_BASE_URL", "http://127.0.0.1:8000")
-API_KEY = os.getenv("API_KEY", "dev-api-key")
+API_KEY = os.getenv("API_KEY") or os.getenv("ADMIN_API_KEY", "dev-secret")
 
 
 def post(path: str, payload: dict) -> tuple[int, dict]:

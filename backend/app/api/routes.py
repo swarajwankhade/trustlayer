@@ -396,6 +396,34 @@ def admin_dashboard_ui() -> HTMLResponse:
 
         <section class="card">
           <h2>Recent Decisions</h2>
+          <div class="form-grid" style="margin-bottom: 10px;">
+            <label>
+              action_type
+              <select id="filterActionType" class="input input-small">
+                <option value="">all</option>
+                <option value="refund">refund</option>
+                <option value="credit_adjustment">credit_adjustment</option>
+              </select>
+            </label>
+            <label>
+              decision
+              <select id="filterDecision" class="input input-small">
+                <option value="">all</option>
+                <option value="ALLOW">ALLOW</option>
+                <option value="ESCALATE">ESCALATE</option>
+                <option value="BLOCK">BLOCK</option>
+              </select>
+            </label>
+            <label>
+              request_id
+              <input id="filterRequestId" class="input input-small" type="text" placeholder="optional request_id" />
+            </label>
+          </div>
+          <div class="toolbar" style="margin-bottom: 10px;">
+            <button id="applyFiltersBtn" class="button">Apply Filters</button>
+            <button id="clearFiltersBtn" class="button">Clear Filters</button>
+          </div>
+          <div id="decisionFiltersBanner" class="banner hidden"></div>
           <table>
             <thead>
               <tr>
@@ -436,10 +464,13 @@ def admin_dashboard_ui() -> HTMLResponse:
       const validatePolicyBtn = document.getElementById("validatePolicyBtn");
       const createPolicyBtn = document.getElementById("createPolicyBtn");
       const activatePolicyBtn = document.getElementById("activatePolicyBtn");
+      const applyFiltersBtn = document.getElementById("applyFiltersBtn");
+      const clearFiltersBtn = document.getElementById("clearFiltersBtn");
       const loadBanner = document.getElementById("loadBanner");
       const controlBanner = document.getElementById("controlBanner");
       const simulationBanner = document.getElementById("simulationBanner");
       const policyEditorBanner = document.getElementById("policyEditorBanner");
+      const decisionFiltersBanner = document.getElementById("decisionFiltersBanner");
       const detailBanner = document.getElementById("detailBanner");
       const replayBanner = document.getElementById("replayBanner");
       const simActionType = document.getElementById("simActionType");
@@ -555,6 +586,38 @@ def admin_dashboard_ui() -> HTMLResponse:
           tr.querySelector('[data-action="replay"]').addEventListener("click", () => replayDecision(item.event_id));
           tbody.appendChild(tr);
         }
+      }
+
+      function getDecisionFilterValues() {
+        return {
+          action_type: document.getElementById("filterActionType").value,
+          decision: document.getElementById("filterDecision").value,
+          request_id: document.getElementById("filterRequestId").value.trim(),
+        };
+      }
+
+      async function loadRecentDecisions(filters) {
+        hideBanner(decisionFiltersBanner);
+        const params = new URLSearchParams();
+        params.set("limit", "10");
+        if (filters.action_type) params.set("action_type", filters.action_type);
+        if (filters.decision) params.set("decision", filters.decision);
+        if (filters.request_id) params.set("request_id", filters.request_id);
+
+        const response = await fetch(`/v1/admin/decisions?${params.toString()}`, { headers: getHeaders() });
+        const data = await response.json();
+        if (!response.ok) {
+          const message = response.status === 401
+            ? "Invalid API key. Update the key and retry."
+            : `Failed to load filtered decisions: ${JSON.stringify(data)}`;
+          showBanner(decisionFiltersBanner, message, false);
+          const tbody = document.getElementById("recentDecisionsBody");
+          tbody.innerHTML = '<tr><td colspan="6" class="muted">Failed to load decisions with selected filters.</td></tr>';
+          return;
+        }
+
+        renderRecentDecisions(data || []);
+        showBanner(decisionFiltersBanner, "Recent decisions updated.", true);
       }
 
       function toggleSimulationFields() {
@@ -917,6 +980,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       async function refreshDashboard() {
         hideBanner(controlBanner);
         hideBanner(loadBanner);
+        hideBanner(decisionFiltersBanner);
         const key = apiKeyInput.value.trim();
         if (!key) {
           showBanner(loadBanner, "API key is required to load dashboard data.", false);
@@ -955,7 +1019,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         ]);
         document.getElementById("byActionType").textContent = JSON.stringify(data.decision_metrics.counts_by_action_type || {}, null, 2);
         document.getElementById("byReasonCode").textContent = JSON.stringify(data.decision_metrics.counts_by_reason_code || {}, null, 2);
-        renderRecentDecisions(data.recent_decisions || []);
+        await loadRecentDecisions(getDecisionFilterValues());
 
         document.getElementById("killEnabled").checked = !!data.runtime_controls.kill_switch_enabled;
         document.getElementById("observeOnly").checked = !!data.runtime_controls.observe_only;
@@ -989,6 +1053,31 @@ def admin_dashboard_ui() -> HTMLResponse:
       validatePolicyBtn.addEventListener("click", validatePolicy);
       createPolicyBtn.addEventListener("click", createPolicy);
       activatePolicyBtn.addEventListener("click", activatePolicy);
+      applyFiltersBtn.addEventListener("click", async () => {
+        const key = apiKeyInput.value.trim();
+        if (!key) {
+          showBanner(decisionFiltersBanner, "API key is required to apply filters.", false);
+          return;
+        }
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+        const tbody = document.getElementById("recentDecisionsBody");
+        tbody.innerHTML = '<tr><td colspan="6" class="muted">Loading filtered decisions...</td></tr>';
+        await loadRecentDecisions(getDecisionFilterValues());
+      });
+      clearFiltersBtn.addEventListener("click", async () => {
+        document.getElementById("filterActionType").value = "";
+        document.getElementById("filterDecision").value = "";
+        document.getElementById("filterRequestId").value = "";
+        const key = apiKeyInput.value.trim();
+        if (!key) {
+          showBanner(decisionFiltersBanner, "API key is required to reload decisions.", false);
+          return;
+        }
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+        const tbody = document.getElementById("recentDecisionsBody");
+        tbody.innerHTML = '<tr><td colspan="6" class="muted">Loading recent decisions...</td></tr>';
+        await loadRecentDecisions(getDecisionFilterValues());
+      });
       simActionType.addEventListener("change", toggleSimulationFields);
       toggleSimulationFields();
 
