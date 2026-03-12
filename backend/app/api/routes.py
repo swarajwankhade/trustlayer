@@ -5,7 +5,9 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
+from redis import Redis
 from sqlalchemy import desc, select, update
 from sqlalchemy.orm import Session
 
@@ -32,7 +34,8 @@ from app.api.schemas import (
     ValidatePolicyResponse,
     cents_to_decimal,
 )
-from app.db.session import get_db_session
+from app.config import get_settings
+from app.db.session import get_db_session, get_engine
 from app.exposure.store import ExposureStore, get_exposure_store
 from app.models import DecisionEvent, Policy
 from app.policies.engine import evaluate_action
@@ -46,6 +49,22 @@ v1_router = APIRouter(prefix="/v1", dependencies=[Depends(require_api_key)])
 @router.get("/health")
 def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/ready")
+def readiness() -> JSONResponse:
+    postgres = "ok" if _postgres_ready() else "error"
+    redis = "ok" if _redis_ready() else "error"
+    is_ready = postgres == "ok" and redis == "ok"
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "status": "ready" if is_ready else "degraded",
+            "postgres": postgres,
+            "redis": redis,
+        },
+    )
 
 
 @v1_router.post("/actions/refund", response_model=ActionDecisionResponse)
@@ -504,3 +523,20 @@ def _extract_simulation_amount(payload: SimulationRequest) -> Decimal:
 
 def _decimal_to_cents(amount: Decimal) -> int:
     return int((amount * Decimal("100")).quantize(Decimal("1")))
+
+
+def _postgres_ready() -> bool:
+    try:
+        with get_engine().connect() as conn:
+            conn.exec_driver_sql("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
+def _redis_ready() -> bool:
+    try:
+        client = Redis.from_url(get_settings().redis_url, decode_responses=True)
+        return bool(client.ping())
+    except Exception:
+        return False
