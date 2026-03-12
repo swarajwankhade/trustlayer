@@ -15,6 +15,9 @@ from app.api.schemas import (
     ActionDecisionResponse,
     CreditActionRequest,
     CreatePolicyRequest,
+    DashboardActivePolicy,
+    DashboardResponse,
+    DashboardRuntimeControls,
     DecisionEventResponse,
     DecisionMetricsResponse,
     DecisionReplayResponse,
@@ -317,6 +320,81 @@ def get_decision_metrics(
     to_ts: datetime | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db_session),
 ) -> DecisionMetricsResponse:
+    return _build_decision_metrics(db=db, action_type=action_type, from_ts=from_ts, to_ts=to_ts)
+
+
+@v1_router.get("/admin/metrics/exposure", response_model=ExposureMetricsResponse)
+def get_exposure_metrics(
+    exposure_store: ExposureStore = Depends(get_exposure_store),
+) -> ExposureMetricsResponse:
+    return _build_exposure_metrics(exposure_store=exposure_store)
+
+
+@v1_router.get("/admin/dashboard", response_model=DashboardResponse)
+def get_dashboard(
+    db: Session = Depends(get_db_session),
+    exposure_store: ExposureStore = Depends(get_exposure_store),
+) -> DashboardResponse:
+    kill_switch = get_or_init_kill_switch(db)
+    active_policy = db.scalar(
+        select(Policy)
+        .where(Policy.status == "ACTIVE")
+        .order_by(desc(Policy.version), desc(Policy.created_at))
+        .limit(1)
+    )
+    recent_events = db.scalars(select(DecisionEvent).order_by(desc(DecisionEvent.timestamp)).limit(10)).all()
+
+    return DashboardResponse(
+        runtime_controls=DashboardRuntimeControls(
+            kill_switch_enabled=kill_switch.enabled,
+            observe_only=kill_switch.observe_only,
+            reason=kill_switch.reason,
+            updated_at=kill_switch.updated_at,
+            updated_by=kill_switch.updated_by,
+        ),
+        active_policy=(
+            DashboardActivePolicy(
+                policy_id=active_policy.id,
+                name=active_policy.name,
+                version=active_policy.version,
+                status=active_policy.status,
+                rules_json=active_policy.rules_json,
+            )
+            if active_policy is not None
+            else None
+        ),
+        decision_metrics=_build_decision_metrics(db=db),
+        exposure_metrics=_build_exposure_metrics(exposure_store=exposure_store),
+        recent_decisions=[DecisionEventResponse.model_validate(event, from_attributes=True) for event in recent_events],
+    )
+
+
+def _build_exposure_metrics(
+    exposure_store: ExposureStore,
+) -> ExposureMetricsResponse:
+    date_bucket = datetime.now(timezone.utc).date()
+    refund_exposure = exposure_store.get_exposure(action_type="refund", user_id="metrics", date=date_bucket)
+    credit_exposure = exposure_store.get_exposure(
+        action_type="credit_adjustment",
+        user_id="metrics",
+        date=date_bucket,
+    )
+    financial_total_amount_cents = exposure_store.get_financial_total(date_bucket)
+
+    return ExposureMetricsResponse(
+        date_bucket_utc=date_bucket.isoformat(),
+        refund_daily_total_amount_cents=_decimal_to_cents(refund_exposure.daily_total_amount),
+        credit_daily_total_amount_cents=_decimal_to_cents(credit_exposure.daily_total_amount),
+        financial_total_amount_cents=financial_total_amount_cents,
+    )
+
+
+def _build_decision_metrics(
+    db: Session,
+    action_type: str | None = None,
+    from_ts: datetime | None = None,
+    to_ts: datetime | None = None,
+) -> DecisionMetricsResponse:
     query = select(DecisionEvent)
     if action_type:
         query = query.where(DecisionEvent.action_type == action_type)
@@ -342,27 +420,6 @@ def get_decision_metrics(
         would_escalate_count=sum(1 for event in events if event.would_decision == "ESCALATE"),
         counts_by_action_type=dict(counts_by_action_type),
         counts_by_reason_code=dict(counts_by_reason_code),
-    )
-
-
-@v1_router.get("/admin/metrics/exposure", response_model=ExposureMetricsResponse)
-def get_exposure_metrics(
-    exposure_store: ExposureStore = Depends(get_exposure_store),
-) -> ExposureMetricsResponse:
-    date_bucket = datetime.now(timezone.utc).date()
-    refund_exposure = exposure_store.get_exposure(action_type="refund", user_id="metrics", date=date_bucket)
-    credit_exposure = exposure_store.get_exposure(
-        action_type="credit_adjustment",
-        user_id="metrics",
-        date=date_bucket,
-    )
-    financial_total_amount_cents = exposure_store.get_financial_total(date_bucket)
-
-    return ExposureMetricsResponse(
-        date_bucket_utc=date_bucket.isoformat(),
-        refund_daily_total_amount_cents=_decimal_to_cents(refund_exposure.daily_total_amount),
-        credit_daily_total_amount_cents=_decimal_to_cents(credit_exposure.daily_total_amount),
-        financial_total_amount_cents=financial_total_amount_cents,
     )
 
 

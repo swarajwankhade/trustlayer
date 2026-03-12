@@ -171,5 +171,29 @@ class ExposureMetricsResponse(BaseModel):
     financial_total_amount_cents: int
 
 
+class DashboardRuntimeControls(BaseModel):
+    kill_switch_enabled: bool
+    observe_only: bool
+    reason: str | None
+    updated_at: datetime
+    updated_by: str
+
+
+class DashboardActivePolicy(BaseModel):
+    policy_id: UUID
+    name: str
+    version: int
+    status: str
+    rules_json: dict[str, Any]
+
+
+class DashboardResponse(BaseModel):
+    runtime_controls: DashboardRuntimeControls
+    active_policy: DashboardActivePolicy | None
+    decision_metrics: DecisionMetricsResponse
+    exposure_metrics: ExposureMetricsResponse
+    recent_decisions: list[DecisionEventResponse]
+
+
 def cents_to_decimal(amount_cents: int) -> Decimal:
     return (Decimal(amount_cents) / Decimal("100")).quantize(Decimal("0.01"))
