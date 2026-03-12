@@ -17,6 +17,7 @@ class FakeExposureStore:
         self.per_user_daily_amounts: dict[tuple[str, str], Decimal] = {}
         self.per_user_daily_counts: dict[tuple[str, str], int] = {}
         self.financial_total_amount = Decimal("0.00")
+        self.action_rate_counts: dict[tuple[str, str], int] = {}
 
     def get_exposure(self, action_type: str, user_id: str, date: date_type) -> ExposureContext:
         _ = date
@@ -51,6 +52,13 @@ class FakeExposureStore:
             raise ExposureStoreUnavailableError("Redis unavailable")
         self.financial_total_amount += amount
         return int(self.financial_total_amount * 100)
+
+    def increment_action_rate(self, action_type: str, minute_bucket: str) -> int:
+        if self.fail:
+            raise ExposureStoreUnavailableError("Redis unavailable")
+        key = (action_type, minute_bucket)
+        self.action_rate_counts[key] = self.action_rate_counts.get(key, 0) + 1
+        return self.action_rate_counts[key]
 
 
 def insert_active_policy(

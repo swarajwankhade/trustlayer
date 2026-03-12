@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.exposure.store import ExposureStore, ExposureStoreUnavailableError
 from app.models import DecisionEvent, KillSwitch
+from app.config import get_settings
 from app.policies.engine import evaluate_action
 from app.policies.schemas import ExposureContext
 from app.policies.service import load_active_policy
@@ -53,9 +54,35 @@ def authorize_action(
         return decision_event
 
     active_policy = load_active_policy(db)
-    decision_date = datetime.now(timezone.utc).date()
+    decision_ts = datetime.now(timezone.utc)
+    decision_date = decision_ts.date()
+    minute_bucket = decision_ts.strftime("%Y-%m-%dT%H:%M")
+    rate_limit = max(get_settings().action_rate_limit_per_minute, 1)
 
     try:
+        current_action_rate = exposure_store.increment_action_rate(
+            action_type=action.action_type,
+            minute_bucket=minute_bucket,
+        )
+        if current_action_rate > rate_limit:
+            decision_event = DecisionEvent(
+                action_type=action.action_type,
+                request_id=action.request_id,
+                decision="ESCALATE",
+                reason_codes=active_policy.base_reason_codes + ["RATE_LIMIT_EXCEEDED"],
+                would_decision=None,
+                would_reason_codes=None,
+                model_version=action.model_version,
+                policy_id=active_policy.policy_id,
+                policy_version=active_policy.policy_version,
+                exposure_snapshot_json=ExposureContext().model_dump(mode="json"),
+                action_payload_json=action.payload_json,
+            )
+            db.add(decision_event)
+            db.commit()
+            db.refresh(decision_event)
+            return decision_event
+
         financial_total_amount_cents = exposure_store.get_financial_total(decision_date)
         exposure_context = exposure_store.get_exposure(
             action_type=action.action_type,

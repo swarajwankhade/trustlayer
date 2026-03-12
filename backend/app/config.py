@@ -11,6 +11,7 @@ class Settings:
     database_url: str | None = field(default_factory=lambda: getenv("DATABASE_URL"))
     api_key: str | None = field(default_factory=lambda: getenv("API_KEY"))
     redis_url: str = field(default_factory=lambda: getenv("REDIS_URL", "redis://localhost:6379/0"))
+    action_rate_limit_per_minute: int = field(default_factory=lambda: int(getenv("ACTION_RATE_LIMIT_PER_MINUTE", "120")))
 
 
 def get_settings() -> Settings:

@@ -30,6 +30,9 @@ class ExposureStore(Protocol):
     def increment_financial_total(self, amount: Decimal, date: date_type) -> int:
         ...
 
+    def increment_action_rate(self, action_type: str, minute_bucket: str) -> int:
+        ...
+
 
 @dataclass
 class RedisExposureStore:
@@ -101,6 +104,17 @@ class RedisExposureStore:
             raise ExposureStoreUnavailableError("Redis unavailable") from exc
         return int(results[0])
 
+    def increment_action_rate(self, action_type: str, minute_bucket: str) -> int:
+        try:
+            key = _action_rate_key(action_type, minute_bucket)
+            with self.client.pipeline(transaction=True) as pipeline:
+                pipeline.incr(key)
+                pipeline.expire(key, 2 * 60)
+                results = pipeline.execute()
+        except RedisError as exc:
+            raise ExposureStoreUnavailableError("Redis unavailable") from exc
+        return int(results[0])
+
 
 def get_exposure_store() -> ExposureStore:
     return RedisExposureStore.from_settings()
@@ -120,6 +134,10 @@ def _per_user_count_key(action_type: str, user_id: str, date_bucket: str) -> str
 
 def _financial_total_key(date_bucket: str) -> str:
     return f"exposure:financial_total:{date_bucket}"
+
+
+def _action_rate_key(action_type: str, minute_bucket: str) -> str:
+    return f"exposure:rate:{action_type}:{minute_bucket}:count"
 
 
 def _decimal_to_cents(amount: Decimal) -> int:
