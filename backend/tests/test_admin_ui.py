@@ -13,6 +13,8 @@ def test_admin_dashboard_ui_includes_key_sections(client: TestClient) -> None:
     assert response.status_code == 200
     html = response.text
     assert "Runtime Controls" in html
+    assert "System Status" in html
+    assert "Version:" in html
     assert "Active Policy" in html
     assert "Decision Metrics" in html
     assert "Exposure Metrics" in html

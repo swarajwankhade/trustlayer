@@ -81,8 +81,8 @@ def readiness() -> JSONResponse:
 
 @router.get("/admin", response_class=HTMLResponse)
 def admin_dashboard_ui() -> HTMLResponse:
-    return HTMLResponse(
-        """
+    settings = get_settings()
+    html_content = """
 <!doctype html>
 <html lang="en">
   <head>
@@ -259,6 +259,11 @@ def admin_dashboard_ui() -> HTMLResponse:
     <div class="container">
       <h1>TrustLayer Operator Dashboard</h1>
       <p class="subtitle">Operational snapshot from <code>/v1/admin/dashboard</code> with runtime controls from <code>/v1/admin/killswitch</code>.</p>
+      <div class="chips">
+        <span class="chip">Service: TrustLayer</span>
+        <span class="chip">Version: __SERVICE_VERSION__</span>
+        <span class="chip">Environment: __APP_ENV__</span>
+      </div>
 
       <section class="card">
         <div class="toolbar">
@@ -270,6 +275,13 @@ def admin_dashboard_ui() -> HTMLResponse:
           <span class="muted">Stored in local browser localStorage for demo convenience.</span>
         </div>
         <div id="lastRefreshed" class="status-line">Last refreshed: never</div>
+        <h3>System Status</h3>
+        <div class="helper">Readiness from <code>/ready</code>.</div>
+        <div class="chips">
+          <span id="statusService" class="chip">Service readiness: unknown</span>
+          <span id="statusPostgres" class="chip">Postgres: unknown</span>
+          <span id="statusRedis" class="chip">Redis: unknown</span>
+        </div>
         <div id="loadBanner" class="banner hidden"></div>
       </section>
 
@@ -650,6 +662,9 @@ def admin_dashboard_ui() -> HTMLResponse:
       const downloadExportBtn = document.getElementById("downloadExportBtn");
       const loadBanner = document.getElementById("loadBanner");
       const lastRefreshed = document.getElementById("lastRefreshed");
+      const statusService = document.getElementById("statusService");
+      const statusPostgres = document.getElementById("statusPostgres");
+      const statusRedis = document.getElementById("statusRedis");
       const controlBanner = document.getElementById("controlBanner");
       const demoHelpersBanner = document.getElementById("demoHelpersBanner");
       const simulationBanner = document.getElementById("simulationBanner");
@@ -770,6 +785,30 @@ def admin_dashboard_ui() -> HTMLResponse:
           card.className = "metric";
           card.innerHTML = `<div class="label">${label}</div><div class="value">${value}</div>`;
           container.appendChild(card);
+        }
+      }
+
+      function setStatusChip(node, label, statusValue) {
+        node.className = "chip";
+        if (statusValue === "ok" || statusValue === "ready") {
+          node.classList.add("chip-good");
+        } else if (statusValue === "error" || statusValue === "degraded") {
+          node.classList.add("chip-bad");
+        }
+        node.textContent = `${label}: ${statusValue}`;
+      }
+
+      async function refreshSystemStatus() {
+        try {
+          const response = await fetch("/ready");
+          const data = await response.json();
+          setStatusChip(statusService, "Service readiness", data.status || "unknown");
+          setStatusChip(statusPostgres, "Postgres", data.postgres || "unknown");
+          setStatusChip(statusRedis, "Redis", data.redis || "unknown");
+        } catch {
+          setStatusChip(statusService, "Service readiness", "error");
+          setStatusChip(statusPostgres, "Postgres", "unknown");
+          setStatusChip(statusRedis, "Redis", "unknown");
         }
       }
 
@@ -1412,6 +1451,9 @@ def admin_dashboard_ui() -> HTMLResponse:
           showBanner(policyEditorBanner, "No policy_id available. Create a policy first or provide activate_policy_id.", false);
           return;
         }
+        if (!confirm(`Activate policy ${policyId}?`)) {
+          return;
+        }
 
         const response = await fetch(`/v1/admin/policies/${policyId}/activate`, {
           method: "POST",
@@ -1522,6 +1564,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       }
 
       async function refreshDashboard() {
+        await refreshSystemStatus();
         hideBanner(controlBanner);
         hideBanner(loadBanner);
         hideBanner(policiesBanner);
@@ -1601,6 +1644,9 @@ def admin_dashboard_ui() -> HTMLResponse:
         const key = apiKeyInput.value.trim();
         if (!key) {
           showBanner(demoHelpersBanner, "API key is required for demo helpers.", false);
+          return;
+        }
+        if (actionLabel === "Reset Demo Data" && !confirm("Reset Demo Data will clear policies, decisions, and local exposure state. Continue?")) {
           return;
         }
         localStorage.setItem(API_KEY_STORAGE_KEY, key);
@@ -1698,12 +1744,16 @@ def admin_dashboard_ui() -> HTMLResponse:
       if (savedApiKey) {
         apiKeyInput.value = savedApiKey;
         refreshDashboard();
+      } else {
+        refreshSystemStatus();
       }
     </script>
   </body>
 </html>
-        """
-    )
+    """
+    html_content = html_content.replace("__SERVICE_VERSION__", settings.service_version)
+    html_content = html_content.replace("__APP_ENV__", settings.app_env)
+    return HTMLResponse(html_content)
 
 
 @v1_router.post("/actions/refund", response_model=ActionDecisionResponse)
