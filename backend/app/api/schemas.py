@@ -56,11 +56,20 @@ class ValidatePolicyResponse(BaseModel):
 
 class PolicyResponse(BaseModel):
     id: UUID
+    policy_id: UUID | None = None
     name: str
     version: int
     status: str
     rules_json: dict[str, Any]
     created_by: str
+    created_at: datetime
+    is_active: bool = False
+
+    @model_validator(mode="after")
+    def set_derived_fields(self) -> "PolicyResponse":
+        self.policy_id = self.id
+        self.is_active = self.status == "ACTIVE"
+        return self
 
 
 class KillSwitchUpdateRequest(BaseModel):

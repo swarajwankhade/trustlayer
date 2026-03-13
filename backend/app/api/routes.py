@@ -218,6 +218,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       .form-grid label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
       .input-small { min-width: 0; width: 100%; }
       .section-note { color: var(--muted); margin-top: 0; margin-bottom: 10px; }
+      .row-active { background: #eef8f1; }
     </style>
   </head>
   <body>
@@ -259,6 +260,28 @@ def admin_dashboard_ui() -> HTMLResponse:
           <div id="policyBadges" class="chips"></div>
           <div id="activePolicyState" class="muted">Waiting for data.</div>
           <pre id="activePolicyRules">{}</pre>
+        </section>
+
+        <section class="card">
+          <h2>Policies</h2>
+          <div id="policiesBanner" class="banner hidden"></div>
+          <table>
+            <thead>
+              <tr>
+                <th>policy_id</th>
+                <th>name</th>
+                <th>version</th>
+                <th>status</th>
+                <th>created_at</th>
+                <th>actions (View Rules / Activate)</th>
+              </tr>
+            </thead>
+            <tbody id="policiesTableBody">
+              <tr><td colspan="6" class="muted">Policies will load here.</td></tr>
+            </tbody>
+          </table>
+          <h3>Policy Rules</h3>
+          <pre id="policyRulesViewer">Select View Rules on a policy row to inspect rules_json.</pre>
         </section>
 
         <section class="card">
@@ -517,6 +540,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       const controlBanner = document.getElementById("controlBanner");
       const simulationBanner = document.getElementById("simulationBanner");
       const policyEditorBanner = document.getElementById("policyEditorBanner");
+      const policiesBanner = document.getElementById("policiesBanner");
       const decisionFiltersBanner = document.getElementById("decisionFiltersBanner");
       const exportBanner = document.getElementById("exportBanner");
       const detailBanner = document.getElementById("detailBanner");
@@ -943,6 +967,55 @@ def admin_dashboard_ui() -> HTMLResponse:
         };
       }
 
+      function renderPoliciesTable(policies) {
+        const tbody = document.getElementById("policiesTableBody");
+        tbody.innerHTML = "";
+        if (!policies.length) {
+          tbody.innerHTML = '<tr><td colspan="6" class="muted">No policies found.</td></tr>';
+          return;
+        }
+
+        for (const policy of policies) {
+          const tr = document.createElement("tr");
+          if (policy.status === "ACTIVE" || policy.is_active) {
+            tr.className = "row-active";
+          }
+          const policyId = policy.policy_id || policy.id;
+          tr.innerHTML = `
+            <td>${policyId}</td>
+            <td>${policy.name}</td>
+            <td>${policy.version}</td>
+            <td>${policy.status}</td>
+            <td>${policy.created_at || "-"}</td>
+            <td><button class="button" data-action="view-rules">View Rules</button> <button class="button" data-action="activate">Activate</button></td>
+          `;
+          tr.querySelector('[data-action="view-rules"]').addEventListener("click", () => {
+            document.getElementById("policyRulesViewer").textContent = JSON.stringify(policy.rules_json || {}, null, 2);
+          });
+          tr.querySelector('[data-action="activate"]').addEventListener("click", async () => {
+            await activatePolicyById(String(policyId), true);
+          });
+          tbody.appendChild(tr);
+        }
+      }
+
+      async function loadPolicies() {
+        hideBanner(policiesBanner);
+        const response = await fetch("/v1/admin/policies", { headers: getHeaders() });
+        const data = await response.json();
+        if (!response.ok) {
+          const message = response.status === 401
+            ? "Invalid API key. Update the key and retry."
+            : `Failed to load policies: ${JSON.stringify(data)}`;
+          showBanner(policiesBanner, message, false);
+          document.getElementById("policiesTableBody").innerHTML = '<tr><td colspan="6" class="muted">Failed to load policies.</td></tr>';
+          return;
+        }
+
+        renderPoliciesTable(data || []);
+        showBanner(policiesBanner, "Policies loaded.", true);
+      }
+
       async function validatePolicy() {
         hideBanner(policyEditorBanner);
         const key = apiKeyInput.value.trim();
@@ -1028,7 +1101,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         showBanner(policyEditorBanner, `Policy created successfully. policy_id=${createdPolicyId}`, true);
       }
 
-      async function activatePolicy() {
+      async function activatePolicyById(policyId, fromRow = false) {
         hideBanner(policyEditorBanner);
         const key = apiKeyInput.value.trim();
         if (!key) {
@@ -1036,9 +1109,6 @@ def admin_dashboard_ui() -> HTMLResponse:
           return;
         }
         localStorage.setItem(API_KEY_STORAGE_KEY, key);
-
-        const manualPolicyId = document.getElementById("activatePolicyId").value.trim();
-        const policyId = manualPolicyId || createdPolicyId;
         if (!policyId) {
           showBanner(policyEditorBanner, "No policy_id available. Create a policy first or provide activate_policy_id.", false);
           return;
@@ -1058,13 +1128,23 @@ def admin_dashboard_ui() -> HTMLResponse:
         }
 
         showBanner(policyEditorBanner, `Policy activated successfully. policy_id=${data.id}`, true);
+        if (fromRow) {
+          showBanner(policiesBanner, `Policy activated successfully. policy_id=${data.id}`, true);
+        }
         await refreshDashboard();
+      }
+
+      async function activatePolicy() {
+        const manualPolicyId = document.getElementById("activatePolicyId").value.trim();
+        const policyId = manualPolicyId || createdPolicyId;
+        await activatePolicyById(policyId);
       }
 
       function setLoadingState() {
         document.getElementById("runtimeText").textContent = "Loading runtime controls...";
         document.getElementById("activePolicyState").textContent = "Loading policy...";
         document.getElementById("activePolicyRules").textContent = "{}";
+        document.getElementById("policiesTableBody").innerHTML = '<tr><td colspan="6" class="muted">Loading policies...</td></tr>';
         document.getElementById("byActionType").textContent = "{}";
         document.getElementById("byReasonCode").textContent = "{}";
         renderMetricGrid("decisionMetricsGrid", [["total_decisions", "..."]]);
@@ -1140,6 +1220,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       async function refreshDashboard() {
         hideBanner(controlBanner);
         hideBanner(loadBanner);
+        hideBanner(policiesBanner);
         hideBanner(decisionFiltersBanner);
         const key = apiKeyInput.value.trim();
         if (!key) {
@@ -1162,6 +1243,7 @@ def admin_dashboard_ui() -> HTMLResponse:
 
         renderRuntimeControls(data.runtime_controls);
         renderActivePolicy(data.active_policy);
+        await loadPolicies();
         renderMetricGrid("decisionMetricsGrid", [
           ["total_decisions", data.decision_metrics.total_decisions],
           ["allow_count", data.decision_metrics.allow_count],
