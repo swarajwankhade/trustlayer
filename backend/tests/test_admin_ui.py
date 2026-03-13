@@ -35,6 +35,8 @@ def test_admin_dashboard_ui_includes_key_sections(client: TestClient) -> None:
     assert "Policies" in html
     assert "View Rules" in html
     assert "Activate" in html
+    assert "Compare Policies" in html
+    assert "Policy Diff" in html
     assert "View / Replay" in html
     assert "Decision Detail" in html
     assert "Replay Result" in html

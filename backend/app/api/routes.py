@@ -329,6 +329,34 @@ def admin_dashboard_ui() -> HTMLResponse:
             <summary>Policy Rules</summary>
             <pre id="policyRulesViewer">Select View Rules on a policy row to inspect rules_json.</pre>
           </details>
+          <h3>Policy Diff</h3>
+          <p class="helper">Compare two policy versions and view only changed rules fields.</p>
+          <div class="form-grid">
+            <label>
+              first policy selector
+              <select id="policyCompareA" class="input input-small"></select>
+            </label>
+            <label>
+              second policy selector
+              <select id="policyCompareB" class="input input-small"></select>
+            </label>
+          </div>
+          <div class="toolbar" style="margin-top: 10px;">
+            <button id="comparePoliciesBtn" class="button">Compare Policies</button>
+          </div>
+          <div id="policyDiffBanner" class="banner hidden"></div>
+          <table>
+            <thead>
+              <tr>
+                <th>field name</th>
+                <th>old value</th>
+                <th>new value</th>
+              </tr>
+            </thead>
+            <tbody id="policyDiffBody">
+              <tr><td colspan="3" class="muted">Select two policies and click Compare Policies.</td></tr>
+            </tbody>
+          </table>
         </section>
 
         <section class="card">
@@ -599,6 +627,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       const validatePolicyBtn = document.getElementById("validatePolicyBtn");
       const createPolicyBtn = document.getElementById("createPolicyBtn");
       const activatePolicyBtn = document.getElementById("activatePolicyBtn");
+      const comparePoliciesBtn = document.getElementById("comparePoliciesBtn");
       const applyFiltersBtn = document.getElementById("applyFiltersBtn");
       const clearFiltersBtn = document.getElementById("clearFiltersBtn");
       const loadMoreDecisionsBtn = document.getElementById("loadMoreDecisionsBtn");
@@ -611,6 +640,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       const simulationBanner = document.getElementById("simulationBanner");
       const policyEditorBanner = document.getElementById("policyEditorBanner");
       const policiesBanner = document.getElementById("policiesBanner");
+      const policyDiffBanner = document.getElementById("policyDiffBanner");
       const decisionFiltersBanner = document.getElementById("decisionFiltersBanner");
       const exportBanner = document.getElementById("exportBanner");
       const detailBanner = document.getElementById("detailBanner");
@@ -618,6 +648,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       const simActionType = document.getElementById("simActionType");
       let createdPolicyId = null;
       let latestExportData = null;
+      let allPolicies = [];
       const RECENT_DECISIONS_PAGE_SIZE = 10;
       let recentDecisionsOffset = 0;
       let recentDecisionsHasMore = true;
@@ -1044,6 +1075,49 @@ def admin_dashboard_ui() -> HTMLResponse:
         };
       }
 
+      function setPolicyDiffMessage(message) {
+        const tbody = document.getElementById("policyDiffBody");
+        tbody.innerHTML = `<tr><td colspan="3" class="muted">${message}</td></tr>`;
+      }
+
+      function populatePolicyCompareSelectors(policies) {
+        const selectorA = document.getElementById("policyCompareA");
+        const selectorB = document.getElementById("policyCompareB");
+        const previousA = selectorA.value;
+        const previousB = selectorB.value;
+
+        for (const selector of [selectorA, selectorB]) {
+          selector.innerHTML = "";
+          const placeholder = document.createElement("option");
+          placeholder.value = "";
+          placeholder.textContent = "Select policy";
+          selector.appendChild(placeholder);
+        }
+
+        for (const policy of policies) {
+          const policyId = policy.policy_id || policy.id;
+          const label = `${policy.name} v${policy.version} (${policyId})${policy.status === "ACTIVE" ? " [ACTIVE]" : ""}`;
+          const optionA = document.createElement("option");
+          optionA.value = policyId;
+          optionA.textContent = label;
+          selectorA.appendChild(optionA);
+
+          const optionB = document.createElement("option");
+          optionB.value = policyId;
+          optionB.textContent = label;
+          selectorB.appendChild(optionB);
+        }
+
+        selectorA.value = policies.some((policy) => (policy.policy_id || policy.id) === previousA) ? previousA : "";
+        selectorB.value = policies.some((policy) => (policy.policy_id || policy.id) === previousB) ? previousB : "";
+
+        if (policies.length < 2) {
+          setPolicyDiffMessage("Need at least two policies to compare.");
+        } else {
+          setPolicyDiffMessage("Select two policies and click Compare Policies.");
+        }
+      }
+
       function renderPoliciesTable(policies) {
         const tbody = document.getElementById("policiesTableBody");
         tbody.innerHTML = "";
@@ -1076,6 +1150,63 @@ def admin_dashboard_ui() -> HTMLResponse:
         }
       }
 
+      function comparePolicies() {
+        hideBanner(policyDiffBanner);
+        if (allPolicies.length < 2) {
+          showBanner(policyDiffBanner, "Need at least two policies to compare.", false);
+          setPolicyDiffMessage("Need at least two policies to compare.");
+          return;
+        }
+
+        const firstId = document.getElementById("policyCompareA").value;
+        const secondId = document.getElementById("policyCompareB").value;
+        if (!firstId || !secondId) {
+          showBanner(policyDiffBanner, "Select two policies before comparing.", false);
+          return;
+        }
+        if (firstId === secondId) {
+          showBanner(policyDiffBanner, "Choose two different policies to compare.", false);
+          return;
+        }
+
+        const first = allPolicies.find((policy) => (policy.policy_id || policy.id) === firstId);
+        const second = allPolicies.find((policy) => (policy.policy_id || policy.id) === secondId);
+        if (!first || !second) {
+          showBanner(policyDiffBanner, "Selected policy not found. Refresh and try again.", false);
+          return;
+        }
+
+        const firstRules = first.rules_json || {};
+        const secondRules = second.rules_json || {};
+        const keys = [...new Set([...Object.keys(firstRules), ...Object.keys(secondRules)])].sort();
+        const changes = keys.filter(
+          (key) => JSON.stringify(firstRules[key]) !== JSON.stringify(secondRules[key])
+        );
+
+        const tbody = document.getElementById("policyDiffBody");
+        tbody.innerHTML = "";
+        if (!changes.length) {
+          setPolicyDiffMessage("No differences.");
+          showBanner(policyDiffBanner, "No differences between selected policies.", true);
+          return;
+        }
+
+        for (const key of changes) {
+          const tr = document.createElement("tr");
+          const fieldCell = document.createElement("td");
+          const oldCell = document.createElement("td");
+          const newCell = document.createElement("td");
+          fieldCell.textContent = key;
+          oldCell.textContent = formatJson(firstRules[key]);
+          newCell.textContent = formatJson(secondRules[key]);
+          tr.appendChild(fieldCell);
+          tr.appendChild(oldCell);
+          tr.appendChild(newCell);
+          tbody.appendChild(tr);
+        }
+        showBanner(policyDiffBanner, `Comparison complete. ${changes.length} field(s) differ.`, true);
+      }
+
       async function loadPolicies() {
         hideBanner(policiesBanner);
         const response = await fetch("/v1/admin/policies", { headers: getHeaders() });
@@ -1086,10 +1217,14 @@ def admin_dashboard_ui() -> HTMLResponse:
             : `Failed to load policies: ${JSON.stringify(data)}`;
           showBanner(policiesBanner, message, false);
           document.getElementById("policiesTableBody").innerHTML = '<tr><td colspan="6" class="muted">Failed to load policies.</td></tr>';
+          allPolicies = [];
+          populatePolicyCompareSelectors([]);
           return;
         }
 
-        renderPoliciesTable(data || []);
+        allPolicies = data || [];
+        renderPoliciesTable(allPolicies);
+        populatePolicyCompareSelectors(allPolicies);
         showBanner(policiesBanner, "Policies loaded.", true);
       }
 
@@ -1298,6 +1433,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         hideBanner(controlBanner);
         hideBanner(loadBanner);
         hideBanner(policiesBanner);
+        hideBanner(policyDiffBanner);
         hideBanner(decisionFiltersBanner);
         const key = apiKeyInput.value.trim();
         if (!key) {
@@ -1416,6 +1552,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       validatePolicyBtn.addEventListener("click", validatePolicy);
       createPolicyBtn.addEventListener("click", createPolicy);
       activatePolicyBtn.addEventListener("click", activatePolicy);
+      comparePoliciesBtn.addEventListener("click", comparePolicies);
       exportDecisionsBtn.addEventListener("click", exportDecisions);
       downloadExportBtn.addEventListener("click", downloadExportJson);
       applyFiltersBtn.addEventListener("click", async () => {
