@@ -26,6 +26,8 @@ class DecisionEvent(Base):
     would_decision: Mapped[str | None] = mapped_column(String(32), nullable=True)
     would_reason_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)), nullable=True)
     model_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    policy_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    runtime_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
     policy_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("policies.id", ondelete="SET NULL"),

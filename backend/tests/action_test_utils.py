@@ -82,6 +82,7 @@ def insert_active_policy(
             name=f"active-policy-{policy_id}",
             version=version,
             status="ACTIVE",
+            policy_type="refund_credit_v1",
             rules_json={
                 "per_action_max_amount": per_action_max_amount,
                 "daily_total_cap_amount": daily_total_cap_amount,

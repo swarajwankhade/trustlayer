@@ -13,6 +13,8 @@ from app.policies.engine import evaluate_action
 from app.policies.schemas import ExposureContext
 from app.policies.service import load_active_policy
 
+DEFAULT_POLICY_TYPE = "refund_credit_v1"
+
 
 @dataclass(frozen=True)
 class ActionAuthorizationInput:
@@ -43,6 +45,8 @@ def authorize_action(
             would_decision=None,
             would_reason_codes=None,
             model_version=action.model_version,
+            policy_type=DEFAULT_POLICY_TYPE,
+            runtime_mode="kill_switch",
             policy_id=None,
             policy_version=None,
             exposure_snapshot_json=ExposureContext().model_dump(mode="json"),
@@ -73,6 +77,8 @@ def authorize_action(
                 would_decision=None,
                 would_reason_codes=None,
                 model_version=action.model_version,
+                policy_type=DEFAULT_POLICY_TYPE,
+                runtime_mode="enforce",
                 policy_id=active_policy.policy_id,
                 policy_version=active_policy.policy_version,
                 exposure_snapshot_json=ExposureContext().model_dump(mode="json"),
@@ -134,6 +140,8 @@ def authorize_action(
         would_decision=would_decision,
         would_reason_codes=would_reason_codes,
         model_version=action.model_version,
+        policy_type=DEFAULT_POLICY_TYPE,
+        runtime_mode="observe_only" if kill_switch.observe_only else "enforce",
         policy_id=active_policy.policy_id,
         policy_version=active_policy.policy_version,
         exposure_snapshot_json=exposure_context.model_dump(mode="json"),

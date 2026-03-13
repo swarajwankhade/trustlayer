@@ -18,6 +18,7 @@ DEMO_POLICY_RULES = {
     "per_user_daily_amount_cap": 20_000,
     "near_cap_escalation_ratio": 0.9,
 }
+DEFAULT_POLICY_TYPE = "refund_credit_v1"
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,7 @@ def bootstrap_demo_data(
             name=policy_name,
             version=policy_version,
             status="INACTIVE",
+            policy_type=DEFAULT_POLICY_TYPE,
             rules_json=DEMO_POLICY_RULES,
             created_by=created_by,
         )

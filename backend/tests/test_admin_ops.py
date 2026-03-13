@@ -187,6 +187,10 @@ def test_kill_switch_forces_escalate_for_refund_and_credit(
     assert credit_event is not None
     assert refund_event.decision == "ESCALATE"
     assert credit_event.decision == "ESCALATE"
+    assert refund_event.runtime_mode == "kill_switch"
+    assert credit_event.runtime_mode == "kill_switch"
+    assert refund_event.policy_type == "refund_credit_v1"
+    assert credit_event.policy_type == "refund_credit_v1"
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id.in_([refund_request_id, credit_request_id])))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))
@@ -294,6 +298,8 @@ def test_get_decision_detail_returns_expected_event(authorized_client: TestClien
     assert detail_response.status_code == 200
     assert detail_response.json()["event_id"] == str(event.event_id)
     assert detail_response.json()["request_id"] == request_id
+    assert detail_response.json()["policy_type"] == "refund_credit_v1"
+    assert detail_response.json()["runtime_mode"] == "enforce"
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))

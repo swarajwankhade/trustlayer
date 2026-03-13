@@ -111,6 +111,8 @@ def test_first_refund_call_persists_one_decision_event(
     events = db_session.scalars(select(DecisionEvent).where(DecisionEvent.request_id == request_id)).all()
     assert len(events) == 1
     assert events[0].action_type == "refund"
+    assert events[0].policy_type == "refund_credit_v1"
+    assert events[0].runtime_mode == "enforce"
     assert events[0].policy_id == policy_id
     assert events[0].policy_version == 2
     assert events[0].exposure_snapshot_json == {
@@ -194,6 +196,8 @@ def test_observe_only_would_block_returns_allow_and_does_not_increment_exposure(
     event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
     assert event is not None
     assert event.decision == "ALLOW"
+    assert event.policy_type == "refund_credit_v1"
+    assert event.runtime_mode == "observe_only"
     assert event.would_decision == "BLOCK"
     assert event.would_reason_codes is not None
     assert "PER_ACTION_MAX_AMOUNT_EXCEEDED" in event.would_reason_codes

@@ -23,6 +23,7 @@ def test_can_create_and_read_policy_row() -> None:
             name=f"test-policy-{policy_id}",
             version=1,
             status="active",
+            policy_type="refund_credit_v1",
             rules_json={"max_amount": 1000},
             created_by="pytest",
         )
@@ -34,6 +35,7 @@ def test_can_create_and_read_policy_row() -> None:
 
         assert saved_policy is not None
         assert saved_policy.name == f"test-policy-{policy_id}"
+        assert saved_policy.policy_type == "refund_credit_v1"
         assert saved_policy.rules_json == {"max_amount": 1000}
 
         session.delete(saved_policy)

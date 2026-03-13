@@ -128,6 +128,8 @@ def test_export_returns_inserted_events_and_would_fields(
     assert body[1]["request_id"] == older_request_id
     assert body[0]["would_decision"] == "BLOCK"
     assert body[0]["would_reason_codes"] == ["PER_ACTION_MAX_AMOUNT_EXCEEDED"]
+    assert "policy_type" in body[0]
+    assert "runtime_mode" in body[0]
 
 
 def test_export_filters_by_action_type(authorized_client: TestClient, db_session: Session) -> None:

@@ -48,6 +48,7 @@ from app.policies.service import ActivePolicy, load_active_policy
 
 router = APIRouter()
 v1_router = APIRouter(prefix="/v1", dependencies=[Depends(require_api_key)])
+DEFAULT_POLICY_TYPE = "refund_credit_v1"
 
 
 @router.get("/health")
@@ -1815,6 +1816,7 @@ def create_policy(payload: CreatePolicyRequest, db: Session = Depends(get_db_ses
         name=payload.name,
         version=payload.version,
         status="INACTIVE",
+        policy_type=DEFAULT_POLICY_TYPE,
         rules_json=validated_rules.model_dump(mode="json"),
         created_by=payload.created_by,
     )
@@ -2126,6 +2128,7 @@ def get_dashboard(
                 name=active_policy.name,
                 version=active_policy.version,
                 status=active_policy.status,
+                policy_type=active_policy.policy_type,
                 rules_json=active_policy.rules_json,
             )
             if active_policy is not None

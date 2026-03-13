@@ -81,6 +81,7 @@ class PolicyResponse(BaseModel):
     name: str
     version: int
     status: str
+    policy_type: str | None = None
     rules_json: dict[str, Any]
     created_by: str
     created_at: datetime
@@ -119,6 +120,8 @@ class DecisionEventResponse(BaseModel):
     would_decision: str | None
     would_reason_codes: list[str] | None
     model_version: str | None
+    policy_type: str | None
+    runtime_mode: str | None
     policy_id: UUID | None
     policy_version: int | None
     exposure_snapshot_json: dict[str, Any]
@@ -224,6 +227,7 @@ class DashboardActivePolicy(BaseModel):
     name: str
     version: int
     status: str
+    policy_type: str | None
     rules_json: dict[str, Any]
 
 
