@@ -1,11 +1,14 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
 
 from redis import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
-from app.actions.service import get_or_init_kill_switch
+from app.actions.service import ActionAuthorizationInput, authorize_action, get_or_init_kill_switch
+from app.exposure.store import ExposureStore
 from app.models import DecisionEvent, KillSwitch, Policy
 
 DEMO_POLICY_RULES = {
@@ -32,6 +35,13 @@ class ResetResult:
     policies_deleted: int
     redis_keys_deleted: int
     kill_switch_enabled: bool
+
+
+@dataclass(frozen=True)
+class GenerateDemoResult:
+    generated_count: int
+    request_ids: list[str]
+    decisions: list[str]
 
 
 def bootstrap_demo_data(
@@ -132,3 +142,94 @@ def _clear_redis_exposure(redis_url: str) -> int:
         return int(deleted_total)
     except RedisError:
         return 0
+
+
+def generate_demo_decisions(
+    db: Session,
+    exposure_store: ExposureStore,
+    *,
+    model_version: str = "demo-v1",
+) -> GenerateDemoResult:
+    bootstrap_demo_data(db, activate_policy=True, created_by="demo-generate")
+    kill_switch = get_or_init_kill_switch(db)
+    if kill_switch.enabled or kill_switch.observe_only:
+        kill_switch.enabled = False
+        kill_switch.observe_only = False
+        kill_switch.reason = "demo-generate reset controls"
+        kill_switch.updated_by = "demo-generate"
+        db.add(kill_switch)
+        db.commit()
+
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    actions = [
+        {
+            "action_type": "refund",
+            "request_id": f"demo-{run_id}-refund-allow",
+            "user_id": "demo-user-1",
+            "amount_cents": 5_000,
+            "payload_json": {
+                "request_id": f"demo-{run_id}-refund-allow",
+                "user_id": "demo-user-1",
+                "ticket_id": "ticket-demo-1",
+                "refund_amount_cents": 5_000,
+                "currency": "USD",
+                "model_version": model_version,
+                "metadata": {"source": "demo-helper"},
+            },
+        },
+        {
+            "action_type": "credit_adjustment",
+            "request_id": f"demo-{run_id}-credit-allow",
+            "user_id": "demo-user-2",
+            "amount_cents": 3_000,
+            "payload_json": {
+                "request_id": f"demo-{run_id}-credit-allow",
+                "user_id": "demo-user-2",
+                "ticket_id": "ticket-demo-2",
+                "credit_amount_cents": 3_000,
+                "currency": "USD",
+                "credit_type": "courtesy",
+                "model_version": model_version,
+                "metadata": {"source": "demo-helper"},
+            },
+        },
+        {
+            "action_type": "refund",
+            "request_id": f"demo-{run_id}-refund-block",
+            "user_id": "demo-user-3",
+            "amount_cents": 15_000,
+            "payload_json": {
+                "request_id": f"demo-{run_id}-refund-block",
+                "user_id": "demo-user-3",
+                "ticket_id": "ticket-demo-3",
+                "refund_amount_cents": 15_000,
+                "currency": "USD",
+                "model_version": model_version,
+                "metadata": {"source": "demo-helper"},
+            },
+        },
+    ]
+
+    decisions: list[str] = []
+    request_ids: list[str] = []
+    for action in actions:
+        event = authorize_action(
+            ActionAuthorizationInput(
+                action_type=action["action_type"],
+                request_id=action["request_id"],
+                user_id=action["user_id"],
+                amount=(Decimal(action["amount_cents"]) / Decimal("100")).quantize(Decimal("0.01")),
+                model_version=model_version,
+                payload_json=action["payload_json"],
+            ),
+            db=db,
+            exposure_store=exposure_store,
+        )
+        decisions.append(event.decision)
+        request_ids.append(action["request_id"])
+
+    return GenerateDemoResult(
+        generated_count=len(request_ids),
+        request_ids=request_ids,
+        decisions=decisions,
+    )

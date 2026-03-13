@@ -20,6 +20,9 @@ from app.api.schemas import (
     DashboardActivePolicy,
     DashboardResponse,
     DashboardRuntimeControls,
+    DemoBootstrapResponse,
+    DemoGenerateResponse,
+    DemoResetResponse,
     DecisionEventResponse,
     DecisionMetricsResponse,
     DecisionReplayResponse,
@@ -36,6 +39,7 @@ from app.api.schemas import (
 )
 from app.config import get_settings
 from app.db.session import get_db_session, get_engine
+from app.devtools.service import bootstrap_demo_data, generate_demo_decisions, reset_dev_data
 from app.exposure.store import ExposureStore, get_exposure_store
 from app.models import DecisionEvent, Policy
 from app.policies.engine import evaluate_action
@@ -274,6 +278,21 @@ def admin_dashboard_ui() -> HTMLResponse:
             <button id="applyControlsBtn" class="button">Apply Controls</button>
           </div>
           <div id="controlBanner" class="banner hidden"></div>
+        </section>
+
+        <section class="card">
+          <h2>Demo Helpers</h2>
+          <p class="helper">Local/demo-only helpers to seed policy baseline, generate sample decisions, and reset demo state.</p>
+          <div class="toolbar">
+            <button id="seedDemoBtn" class="button">Seed Demo Policy</button>
+            <button id="generateDemoBtn" class="button">Generate Demo Events</button>
+            <button id="resetDemoBtn" class="button">Reset Demo Data</button>
+          </div>
+          <div id="demoHelpersBanner" class="banner hidden"></div>
+          <details class="json-block" open>
+            <summary>Demo Helper Result</summary>
+            <pre id="demoHelpersResult">No demo helper action run yet.</pre>
+          </details>
         </section>
 
         <section class="card">
@@ -573,6 +592,9 @@ def admin_dashboard_ui() -> HTMLResponse:
       const apiKeyInput = document.getElementById("apiKey");
       const refreshBtn = document.getElementById("refreshBtn");
       const applyControlsBtn = document.getElementById("applyControlsBtn");
+      const seedDemoBtn = document.getElementById("seedDemoBtn");
+      const generateDemoBtn = document.getElementById("generateDemoBtn");
+      const resetDemoBtn = document.getElementById("resetDemoBtn");
       const runSimulationBtn = document.getElementById("runSimulationBtn");
       const validatePolicyBtn = document.getElementById("validatePolicyBtn");
       const createPolicyBtn = document.getElementById("createPolicyBtn");
@@ -585,6 +607,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       const loadBanner = document.getElementById("loadBanner");
       const lastRefreshed = document.getElementById("lastRefreshed");
       const controlBanner = document.getElementById("controlBanner");
+      const demoHelpersBanner = document.getElementById("demoHelpersBanner");
       const simulationBanner = document.getElementById("simulationBanner");
       const policyEditorBanner = document.getElementById("policyEditorBanner");
       const policiesBanner = document.getElementById("policiesBanner");
@@ -1345,8 +1368,50 @@ def admin_dashboard_ui() -> HTMLResponse:
         await refreshDashboard();
       }
 
+      async function runDemoHelper(endpoint, actionLabel) {
+        hideBanner(demoHelpersBanner);
+        const key = apiKeyInput.value.trim();
+        if (!key) {
+          showBanner(demoHelpersBanner, "API key is required for demo helpers.", false);
+          return;
+        }
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+
+        seedDemoBtn.disabled = true;
+        generateDemoBtn.disabled = true;
+        resetDemoBtn.disabled = true;
+        document.getElementById("demoHelpersResult").textContent = `Running ${actionLabel}...`;
+
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: getHeaders(),
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            const message = response.status === 401
+              ? "Invalid API key. Update the key and retry."
+              : `${actionLabel} failed: ${JSON.stringify(data)}`;
+            showBanner(demoHelpersBanner, message, false);
+            document.getElementById("demoHelpersResult").textContent = `${actionLabel} failed.`;
+            return;
+          }
+
+          document.getElementById("demoHelpersResult").textContent = formatJson(data);
+          showBanner(demoHelpersBanner, `${actionLabel} completed.`, true);
+          await refreshDashboard();
+        } finally {
+          seedDemoBtn.disabled = false;
+          generateDemoBtn.disabled = false;
+          resetDemoBtn.disabled = false;
+        }
+      }
+
       refreshBtn.addEventListener("click", refreshDashboard);
       applyControlsBtn.addEventListener("click", applyControls);
+      seedDemoBtn.addEventListener("click", () => runDemoHelper("/v1/admin/demo/bootstrap", "Seed Demo Policy"));
+      generateDemoBtn.addEventListener("click", () => runDemoHelper("/v1/admin/demo/generate", "Generate Demo Events"));
+      resetDemoBtn.addEventListener("click", () => runDemoHelper("/v1/admin/demo/reset", "Reset Demo Data"));
       runSimulationBtn.addEventListener("click", runSimulation);
       validatePolicyBtn.addEventListener("click", validatePolicy);
       createPolicyBtn.addEventListener("click", createPolicy);
@@ -1533,6 +1598,50 @@ def update_kill_switch(payload: KillSwitchUpdateRequest, db: Session = Depends(g
     db.commit()
     db.refresh(kill_switch)
     return KillSwitchResponse.model_validate(kill_switch, from_attributes=True)
+
+
+@v1_router.post("/admin/demo/bootstrap", response_model=DemoBootstrapResponse)
+def demo_bootstrap(db: Session = Depends(get_db_session)) -> DemoBootstrapResponse:
+    result = bootstrap_demo_data(
+        db,
+        activate_policy=True,
+        created_by="admin-demo-helper",
+    )
+    return DemoBootstrapResponse(
+        created_kill_switch=result.created_kill_switch,
+        created_policy=result.created_policy,
+        activated_policy=result.activated_policy,
+        policy_id=result.policy_id,
+        policy_version=result.policy_version,
+    )
+
+
+@v1_router.post("/admin/demo/generate", response_model=DemoGenerateResponse)
+def demo_generate(
+    db: Session = Depends(get_db_session),
+    exposure_store: ExposureStore = Depends(get_exposure_store),
+) -> DemoGenerateResponse:
+    result = generate_demo_decisions(db, exposure_store=exposure_store)
+    return DemoGenerateResponse(
+        generated_count=result.generated_count,
+        request_ids=result.request_ids,
+        decisions=result.decisions,
+    )
+
+
+@v1_router.post("/admin/demo/reset", response_model=DemoResetResponse)
+def demo_reset(db: Session = Depends(get_db_session)) -> DemoResetResponse:
+    result = reset_dev_data(
+        db,
+        redis_url=get_settings().redis_url,
+        updated_by="admin-demo-helper",
+    )
+    return DemoResetResponse(
+        decision_events_deleted=result.decision_events_deleted,
+        policies_deleted=result.policies_deleted,
+        redis_keys_deleted=result.redis_keys_deleted,
+        kill_switch_enabled=result.kill_switch_enabled,
+    )
 
 
 @v1_router.get("/admin/decisions", response_model=list[DecisionEventResponse])

@@ -54,6 +54,27 @@ class ValidatePolicyResponse(BaseModel):
     warnings: list[str]
 
 
+class DemoBootstrapResponse(BaseModel):
+    created_kill_switch: bool
+    created_policy: bool
+    activated_policy: bool
+    policy_id: str | None
+    policy_version: int | None
+
+
+class DemoGenerateResponse(BaseModel):
+    generated_count: int
+    request_ids: list[str]
+    decisions: list[str]
+
+
+class DemoResetResponse(BaseModel):
+    decision_events_deleted: int
+    policies_deleted: int
+    redis_keys_deleted: int
+    kill_switch_enabled: bool
+
+
 class PolicyResponse(BaseModel):
     id: UUID
     policy_id: UUID | None = None

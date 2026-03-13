@@ -95,6 +95,7 @@ curl -s http://localhost:8000/version
 4. Inspect outcomes:
 - Dashboard: [http://localhost:8000/admin](http://localhost:8000/admin)
 - Admin API snapshot: `GET /v1/admin/dashboard`
+- Demo helpers card (`Seed Demo Policy`, `Generate Demo Events`, `Reset Demo Data`) is intended for local/demo environments only.
 
 ## 5) Policy Rollout Guidance (Safe Sequence)
 

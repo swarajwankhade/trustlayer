@@ -28,6 +28,10 @@ def test_admin_dashboard_ui_includes_key_sections(client: TestClient) -> None:
     assert "Validate Policy" in html
     assert "Create Policy" in html
     assert "Activate Policy" in html
+    assert "Demo Helpers" in html
+    assert "Seed Demo Policy" in html
+    assert "Generate Demo Events" in html
+    assert "Reset Demo Data" in html
     assert "Policies" in html
     assert "View Rules" in html
     assert "Activate" in html

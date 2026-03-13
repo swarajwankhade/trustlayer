@@ -107,6 +107,37 @@ def test_post_kill_switch_updates_state(authorized_client: TestClient, db_sessio
     _set_kill_switch(db_session, enabled=False, reason="reset", updated_by="pytest")
 
 
+def test_demo_helper_endpoints_bootstrap_generate_reset(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    reset_start = authorized_client.post("/v1/admin/demo/reset")
+    assert reset_start.status_code == 200
+
+    bootstrap_response = authorized_client.post("/v1/admin/demo/bootstrap")
+    assert bootstrap_response.status_code == 200
+    bootstrap_payload = bootstrap_response.json()
+    assert bootstrap_payload["policy_id"] is not None
+    assert bootstrap_payload["policy_version"] == 1
+
+    generate_response = authorized_client.post("/v1/admin/demo/generate")
+    assert generate_response.status_code == 200
+    generate_payload = generate_response.json()
+    assert generate_payload["generated_count"] == 3
+    assert len(generate_payload["request_ids"]) == 3
+    assert len(generate_payload["decisions"]) == 3
+
+    reset_response = authorized_client.post("/v1/admin/demo/reset")
+    assert reset_response.status_code == 200
+    reset_payload = reset_response.json()
+    assert reset_payload["kill_switch_enabled"] is False
+
+    event_count = db_session.scalar(select(func.count()).select_from(DecisionEvent))
+    policy_count = db_session.scalar(select(func.count()).select_from(Policy))
+    assert event_count == 0
+    assert policy_count == 0
+
+
 def test_kill_switch_forces_escalate_for_refund_and_credit(
     authorized_client: TestClient,
     db_session: Session,
