@@ -202,6 +202,41 @@ def test_get_decisions_returns_and_filters(authorized_client: TestClient, db_ses
     db_session.commit()
 
 
+def test_get_decisions_supports_offset(authorized_client: TestClient, db_session: Session) -> None:
+    _set_kill_switch(db_session, enabled=False, reason="normal", updated_by="pytest")
+    policy_id = insert_active_policy(db_session, version=52)
+    user_id = f"user-offset-{uuid.uuid4()}"
+    request_ids = [f"req-{uuid.uuid4()}" for _ in range(3)]
+
+    for request_id in request_ids:
+        action_response = authorized_client.post(
+            "/v1/actions/refund",
+            json={
+                "request_id": request_id,
+                "user_id": user_id,
+                "ticket_id": "ticket-offset",
+                "refund_amount_cents": 1000,
+                "currency": "USD",
+                "model_version": "gpt-test",
+                "metadata": {},
+            },
+        )
+        assert action_response.status_code == 200
+
+    first_page = authorized_client.get("/v1/admin/decisions", params={"user_id": user_id, "limit": 1, "offset": 0})
+    second_page = authorized_client.get("/v1/admin/decisions", params={"user_id": user_id, "limit": 1, "offset": 1})
+
+    assert first_page.status_code == 200
+    assert second_page.status_code == 200
+    assert len(first_page.json()) == 1
+    assert len(second_page.json()) == 1
+    assert first_page.json()[0]["request_id"] != second_page.json()[0]["request_id"]
+
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id.in_(request_ids)))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
 def test_get_decision_detail_returns_expected_event(authorized_client: TestClient, db_session: Session) -> None:
     _set_kill_switch(db_session, enabled=False, reason="normal", updated_by="pytest")
     policy_id = insert_active_policy(db_session, version=60)

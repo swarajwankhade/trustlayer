@@ -37,3 +37,4 @@ def test_admin_dashboard_ui_includes_key_sections(client: TestClient) -> None:
     assert "request_id" in html
     assert "Export Decisions" in html
     assert "Download JSON" in html
+    assert "Load More" in html

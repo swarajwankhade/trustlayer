@@ -439,6 +439,9 @@ def admin_dashboard_ui() -> HTMLResponse:
               <tr><td colspan="6" class="muted">No data loaded yet.</td></tr>
             </tbody>
           </table>
+          <div class="toolbar" style="margin-top: 10px;">
+            <button id="loadMoreDecisionsBtn" class="button">Load More</button>
+          </div>
         </section>
 
         <section class="card">
@@ -507,6 +510,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       const activatePolicyBtn = document.getElementById("activatePolicyBtn");
       const applyFiltersBtn = document.getElementById("applyFiltersBtn");
       const clearFiltersBtn = document.getElementById("clearFiltersBtn");
+      const loadMoreDecisionsBtn = document.getElementById("loadMoreDecisionsBtn");
       const exportDecisionsBtn = document.getElementById("exportDecisionsBtn");
       const downloadExportBtn = document.getElementById("downloadExportBtn");
       const loadBanner = document.getElementById("loadBanner");
@@ -520,6 +524,10 @@ def admin_dashboard_ui() -> HTMLResponse:
       const simActionType = document.getElementById("simActionType");
       let createdPolicyId = null;
       let latestExportData = null;
+      const RECENT_DECISIONS_PAGE_SIZE = 10;
+      let recentDecisionsOffset = 0;
+      let recentDecisionsHasMore = true;
+      let currentDecisionFilters = { action_type: "", decision: "", request_id: "" };
 
       function showBanner(node, message, ok) {
         node.textContent = message;
@@ -605,11 +613,15 @@ def admin_dashboard_ui() -> HTMLResponse:
         rules.textContent = JSON.stringify(policy.rules_json || {}, null, 2);
       }
 
-      function renderRecentDecisions(items) {
+      function renderRecentDecisions(items, append = false) {
         const tbody = document.getElementById("recentDecisionsBody");
-        tbody.innerHTML = "";
+        if (!append) {
+          tbody.innerHTML = "";
+        }
         if (!items.length) {
-          tbody.innerHTML = '<tr><td colspan="6" class="muted">No recent decisions available.</td></tr>';
+          if (!append) {
+            tbody.innerHTML = '<tr><td colspan="6" class="muted">No recent decisions available.</td></tr>';
+          }
           return;
         }
 
@@ -641,10 +653,28 @@ def admin_dashboard_ui() -> HTMLResponse:
         };
       }
 
-      async function loadRecentDecisions(filters) {
+      function setRecentDecisionsLoading(message) {
+        const tbody = document.getElementById("recentDecisionsBody");
+        tbody.innerHTML = `<tr><td colspan="6" class="muted">${message}</td></tr>`;
+      }
+
+      function updateLoadMoreButton() {
+        loadMoreDecisionsBtn.disabled = !recentDecisionsHasMore;
+        loadMoreDecisionsBtn.style.display = recentDecisionsHasMore ? "inline-block" : "none";
+      }
+
+      function resetRecentDecisionsPagination(filters) {
+        currentDecisionFilters = { ...filters };
+        recentDecisionsOffset = 0;
+        recentDecisionsHasMore = true;
+        updateLoadMoreButton();
+      }
+
+      async function loadRecentDecisions(filters, append = false) {
         hideBanner(decisionFiltersBanner);
         const params = new URLSearchParams();
-        params.set("limit", "10");
+        params.set("limit", String(RECENT_DECISIONS_PAGE_SIZE));
+        params.set("offset", String(append ? recentDecisionsOffset : 0));
         if (filters.action_type) params.set("action_type", filters.action_type);
         if (filters.decision) params.set("decision", filters.decision);
         if (filters.request_id) params.set("request_id", filters.request_id);
@@ -656,12 +686,25 @@ def admin_dashboard_ui() -> HTMLResponse:
             ? "Invalid API key. Update the key and retry."
             : `Failed to load filtered decisions: ${JSON.stringify(data)}`;
           showBanner(decisionFiltersBanner, message, false);
-          const tbody = document.getElementById("recentDecisionsBody");
-          tbody.innerHTML = '<tr><td colspan="6" class="muted">Failed to load decisions with selected filters.</td></tr>';
+          if (!append) {
+            const tbody = document.getElementById("recentDecisionsBody");
+            tbody.innerHTML = '<tr><td colspan="6" class="muted">Failed to load decisions with selected filters.</td></tr>';
+          }
           return;
         }
 
-        renderRecentDecisions(data || []);
+        const rows = data || [];
+        renderRecentDecisions(rows, append);
+        if (!append && rows.length === 0) {
+          recentDecisionsHasMore = false;
+          updateLoadMoreButton();
+          showBanner(decisionFiltersBanner, "No decisions found for current filters.", true);
+          return;
+        }
+
+        recentDecisionsOffset = (append ? recentDecisionsOffset : 0) + rows.length;
+        recentDecisionsHasMore = rows.length === RECENT_DECISIONS_PAGE_SIZE;
+        updateLoadMoreButton();
         showBanner(decisionFiltersBanner, "Recent decisions updated.", true);
       }
 
@@ -1026,8 +1069,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         document.getElementById("byReasonCode").textContent = "{}";
         renderMetricGrid("decisionMetricsGrid", [["total_decisions", "..."]]);
         renderMetricGrid("exposureMetricsGrid", [["financial_total_amount_cents", "..."]]);
-        const tbody = document.getElementById("recentDecisionsBody");
-        tbody.innerHTML = '<tr><td colspan="6" class="muted">Loading recent decisions...</td></tr>';
+        setRecentDecisionsLoading("Loading recent decisions...");
       }
 
       async function loadDecisionDetail(eventId) {
@@ -1137,7 +1179,8 @@ def admin_dashboard_ui() -> HTMLResponse:
         ]);
         document.getElementById("byActionType").textContent = JSON.stringify(data.decision_metrics.counts_by_action_type || {}, null, 2);
         document.getElementById("byReasonCode").textContent = JSON.stringify(data.decision_metrics.counts_by_reason_code || {}, null, 2);
-        await loadRecentDecisions(getDecisionFilterValues());
+        resetRecentDecisionsPagination(getDecisionFilterValues());
+        await loadRecentDecisions(currentDecisionFilters);
 
         document.getElementById("killEnabled").checked = !!data.runtime_controls.kill_switch_enabled;
         document.getElementById("observeOnly").checked = !!data.runtime_controls.observe_only;
@@ -1180,9 +1223,9 @@ def admin_dashboard_ui() -> HTMLResponse:
           return;
         }
         localStorage.setItem(API_KEY_STORAGE_KEY, key);
-        const tbody = document.getElementById("recentDecisionsBody");
-        tbody.innerHTML = '<tr><td colspan="6" class="muted">Loading filtered decisions...</td></tr>';
-        await loadRecentDecisions(getDecisionFilterValues());
+        resetRecentDecisionsPagination(getDecisionFilterValues());
+        setRecentDecisionsLoading("Loading filtered decisions...");
+        await loadRecentDecisions(currentDecisionFilters);
       });
       clearFiltersBtn.addEventListener("click", async () => {
         document.getElementById("filterActionType").value = "";
@@ -1194,9 +1237,28 @@ def admin_dashboard_ui() -> HTMLResponse:
           return;
         }
         localStorage.setItem(API_KEY_STORAGE_KEY, key);
-        const tbody = document.getElementById("recentDecisionsBody");
-        tbody.innerHTML = '<tr><td colspan="6" class="muted">Loading recent decisions...</td></tr>';
-        await loadRecentDecisions(getDecisionFilterValues());
+        resetRecentDecisionsPagination(getDecisionFilterValues());
+        setRecentDecisionsLoading("Loading recent decisions...");
+        await loadRecentDecisions(currentDecisionFilters);
+      });
+      loadMoreDecisionsBtn.addEventListener("click", async () => {
+        if (!recentDecisionsHasMore) {
+          return;
+        }
+        const key = apiKeyInput.value.trim();
+        if (!key) {
+          showBanner(decisionFiltersBanner, "API key is required to load more decisions.", false);
+          return;
+        }
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+        loadMoreDecisionsBtn.disabled = true;
+        loadMoreDecisionsBtn.textContent = "Loading...";
+        try {
+          await loadRecentDecisions(currentDecisionFilters, true);
+        } finally {
+          loadMoreDecisionsBtn.textContent = "Load More";
+          updateLoadMoreButton();
+        }
       });
       simActionType.addEventListener("change", toggleSimulationFields);
       toggleSimulationFields();
@@ -1345,9 +1407,11 @@ def list_decisions(
     from_ts: datetime | None = Query(default=None, alias="from"),
     to_ts: datetime | None = Query(default=None, alias="to"),
     limit: int = 50,
+    offset: int = 0,
     db: Session = Depends(get_db_session),
 ) -> list[DecisionEventResponse]:
     normalized_limit = min(max(limit, 1), 200)
+    normalized_offset = max(offset, 0)
     query = select(DecisionEvent)
 
     if action_type:
@@ -1363,7 +1427,9 @@ def list_decisions(
     if to_ts:
         query = query.where(DecisionEvent.timestamp <= to_ts)
 
-    events = db.scalars(query.order_by(desc(DecisionEvent.timestamp)).limit(normalized_limit)).all()
+    events = db.scalars(
+        query.order_by(desc(DecisionEvent.timestamp)).offset(normalized_offset).limit(normalized_limit)
+    ).all()
     return [DecisionEventResponse.model_validate(event, from_attributes=True) for event in events]
 
 
