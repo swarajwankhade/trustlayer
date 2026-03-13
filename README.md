@@ -109,3 +109,8 @@ uv run python scripts/reset_dev_data.py
 - Action and admin endpoints require `X-API-Key`.
 - Rate guard is configured by `ACTION_RATE_LIMIT_PER_MINUTE`.
 - Service version defaults to `0.1.0` and can be overridden by `SERVICE_VERSION`.
+
+## Runbook
+
+For deployment/startup/operations guidance, see:
+- [docs/runbook.md](docs/runbook.md)
