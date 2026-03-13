@@ -108,12 +108,14 @@ def admin_dashboard_ui() -> HTMLResponse:
       .container { max-width: 1200px; margin: 0 auto; }
       h1 { margin: 0 0 8px; font-size: 28px; }
       h2 { margin: 0 0 12px; font-size: 18px; }
+      h3 { margin: 14px 0 8px; font-size: 15px; color: #28384a; }
       .subtitle { margin: 0 0 20px; color: var(--muted); }
       .card {
         background: var(--surface);
         border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 14px;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 2px 8px rgba(16, 36, 64, 0.04);
       }
       .grid {
         display: grid;
@@ -219,6 +221,23 @@ def admin_dashboard_ui() -> HTMLResponse:
       .input-small { min-width: 0; width: 100%; }
       .section-note { color: var(--muted); margin-top: 0; margin-bottom: 10px; }
       .row-active { background: #eef8f1; }
+      .helper {
+        margin: 0 0 10px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .json-block { margin-top: 10px; }
+      details > summary {
+        cursor: pointer;
+        color: #2a3c51;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .status-line {
+        font-size: 13px;
+        color: var(--muted);
+        margin-top: 8px;
+      }
     </style>
   </head>
   <body>
@@ -235,12 +254,14 @@ def admin_dashboard_ui() -> HTMLResponse:
           <button id="refreshBtn" class="button button-primary">Refresh Dashboard</button>
           <span class="muted">Stored in local browser localStorage for demo convenience.</span>
         </div>
+        <div id="lastRefreshed" class="status-line">Last refreshed: never</div>
         <div id="loadBanner" class="banner hidden"></div>
       </section>
 
       <div class="stack">
         <section class="card">
           <h2>Runtime Controls</h2>
+          <p class="helper">Observe Only keeps responses as ALLOW while recording the underlying would-decision for safe rollout visibility.</p>
           <div class="chips" id="runtimeChips"></div>
           <div id="runtimeText" class="muted">Waiting for data.</div>
           <div class="inline-controls">
@@ -257,13 +278,18 @@ def admin_dashboard_ui() -> HTMLResponse:
 
         <section class="card">
           <h2>Active Policy</h2>
+          <p class="helper">Current ACTIVE policy used by action evaluation.</p>
           <div id="policyBadges" class="chips"></div>
           <div id="activePolicyState" class="muted">Waiting for data.</div>
-          <pre id="activePolicyRules">{}</pre>
+          <details class="json-block" open>
+            <summary>Rules JSON</summary>
+            <pre id="activePolicyRules">{}</pre>
+          </details>
         </section>
 
         <section class="card">
           <h2>Policies</h2>
+          <p class="helper">Policy history ordered newest first. Activate switches the active policy used by decisioning.</p>
           <div id="policiesBanner" class="banner hidden"></div>
           <table>
             <thead>
@@ -280,8 +306,10 @@ def admin_dashboard_ui() -> HTMLResponse:
               <tr><td colspan="6" class="muted">Policies will load here.</td></tr>
             </tbody>
           </table>
-          <h3>Policy Rules</h3>
-          <pre id="policyRulesViewer">Select View Rules on a policy row to inspect rules_json.</pre>
+          <details class="json-block" open>
+            <summary>Policy Rules</summary>
+            <pre id="policyRulesViewer">Select View Rules on a policy row to inspect rules_json.</pre>
+          </details>
         </section>
 
         <section class="card">
@@ -333,6 +361,7 @@ def admin_dashboard_ui() -> HTMLResponse:
 
         <section class="card">
           <h2>Decision Metrics</h2>
+          <p class="helper">Aggregate decision outcomes from the decision ledger.</p>
           <div id="decisionMetricsGrid" class="metrics"></div>
           <div class="grid" style="margin-top: 10px;">
             <div>
@@ -348,12 +377,13 @@ def admin_dashboard_ui() -> HTMLResponse:
 
         <section class="card">
           <h2>Exposure Metrics</h2>
+          <p class="helper">Current Redis exposure counters for today (UTC date bucket).</p>
           <div id="exposureMetricsGrid" class="metrics"></div>
         </section>
 
         <section class="card">
           <h2>Simulation</h2>
-          <p class="section-note">Dry-run evaluator call via <code>POST /v1/admin/simulate</code>. No decision event or exposure mutation.</p>
+          <p class="section-note">Dry-run evaluator call via <code>POST /v1/admin/simulate</code>. No decision event write and no Redis exposure mutation.</p>
           <div class="form-grid">
             <label>
               Action Type
@@ -414,11 +444,15 @@ def admin_dashboard_ui() -> HTMLResponse:
             <button id="runSimulationBtn" class="button">Run Simulation</button>
           </div>
           <div id="simulationBanner" class="banner hidden"></div>
-          <pre id="simulationResult">No simulation run yet.</pre>
+          <details class="json-block" open>
+            <summary>Simulation Result</summary>
+            <pre id="simulationResult">No simulation run yet.</pre>
+          </details>
         </section>
 
         <section class="card">
           <h2>Recent Decisions</h2>
+          <p class="helper">Newest decision events first. Use filters for targeted inspection, then View or Replay any row.</p>
           <div class="form-grid" style="margin-bottom: 10px;">
             <label>
               action_type
@@ -469,6 +503,7 @@ def admin_dashboard_ui() -> HTMLResponse:
 
         <section class="card">
           <h2>Export Decisions</h2>
+          <p class="helper">Run filtered exports for offline audit/debug. JSON download uses the latest successful export result.</p>
           <div class="form-grid">
             <label>
               action_type
@@ -505,19 +540,30 @@ def admin_dashboard_ui() -> HTMLResponse:
             <button id="downloadExportBtn" class="button">Download JSON</button>
           </div>
           <div id="exportBanner" class="banner hidden"></div>
-          <pre id="exportResult">No export run yet.</pre>
+          <details class="json-block" open>
+            <summary>Export Preview</summary>
+            <pre id="exportResult">No export run yet.</pre>
+          </details>
         </section>
 
         <section class="card">
           <h2>Decision Detail</h2>
+          <p class="helper">View the stored event payload and exposure snapshot used at decision time.</p>
           <div id="detailBanner" class="banner hidden"></div>
-          <pre id="decisionDetailResult">Select View from a recent decision row to inspect details.</pre>
+          <details class="json-block" open>
+            <summary>Decision Detail JSON</summary>
+            <pre id="decisionDetailResult">Select View from a recent decision row to inspect details.</pre>
+          </details>
         </section>
 
         <section class="card">
           <h2>Replay Result</h2>
+          <p class="helper">Replay recomputes a historical decision using stored policy version and exposure snapshot only.</p>
           <div id="replayBanner" class="banner hidden"></div>
-          <pre id="decisionReplayResult">Select Replay from a recent decision row to run deterministic replay.</pre>
+          <details class="json-block" open>
+            <summary>Replay Result JSON</summary>
+            <pre id="decisionReplayResult">Select Replay from a recent decision row to run deterministic replay.</pre>
+          </details>
         </section>
       </div>
     </div>
@@ -537,6 +583,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       const exportDecisionsBtn = document.getElementById("exportDecisionsBtn");
       const downloadExportBtn = document.getElementById("downloadExportBtn");
       const loadBanner = document.getElementById("loadBanner");
+      const lastRefreshed = document.getElementById("lastRefreshed");
       const controlBanner = document.getElementById("controlBanner");
       const simulationBanner = document.getElementById("simulationBanner");
       const policyEditorBanner = document.getElementById("policyEditorBanner");
@@ -569,6 +616,13 @@ def admin_dashboard_ui() -> HTMLResponse:
         const key = apiKeyInput.value.trim();
         if (!key) return { "Content-Type": "application/json" };
         return { "Content-Type": "application/json", "X-API-Key": key };
+      }
+
+      function formatJson(value) {
+        if (value === null || value === undefined) {
+          return "null";
+        }
+        return JSON.stringify(value, null, 2);
       }
 
       function chipClassForDecision(value) {
@@ -634,7 +688,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         badges.appendChild(versionChip);
 
         state.textContent = `Policy ID: ${policy.policy_id}`;
-        rules.textContent = JSON.stringify(policy.rules_json || {}, null, 2);
+        rules.textContent = formatJson(policy.rules_json || {});
       }
 
       function renderRecentDecisions(items, append = false) {
@@ -784,7 +838,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         }
 
         showBanner(exportBanner, `Exported ${latestExportData.length} decision event(s).`, true);
-        document.getElementById("exportResult").textContent = JSON.stringify(latestExportData, null, 2);
+        document.getElementById("exportResult").textContent = formatJson(latestExportData);
       }
 
       function downloadExportJson() {
@@ -888,7 +942,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           policy_version: result.policy_version,
           exposure_context_used: result.exposure_context_used,
         };
-        document.getElementById("simulationResult").textContent = JSON.stringify(output, null, 2);
+        document.getElementById("simulationResult").textContent = formatJson(output);
       }
 
       async function runSimulation() {
@@ -990,7 +1044,7 @@ def admin_dashboard_ui() -> HTMLResponse:
             <td><button class="button" data-action="view-rules">View Rules</button> <button class="button" data-action="activate">Activate</button></td>
           `;
           tr.querySelector('[data-action="view-rules"]').addEventListener("click", () => {
-            document.getElementById("policyRulesViewer").textContent = JSON.stringify(policy.rules_json || {}, null, 2);
+            document.getElementById("policyRulesViewer").textContent = formatJson(policy.rules_json || {});
           });
           tr.querySelector('[data-action="activate"]').addEventListener("click", async () => {
             await activatePolicyById(String(policyId), true);
@@ -1055,7 +1109,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           errors: data.errors || [],
           warnings: data.warnings || [],
         };
-        document.getElementById("policyValidationResult").textContent = JSON.stringify(validationOutput, null, 2);
+        document.getElementById("policyValidationResult").textContent = formatJson(validationOutput);
         showBanner(
           policyEditorBanner,
           data.valid ? "Policy validation: valid." : "Policy validation: invalid. Review errors below.",
@@ -1180,7 +1234,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           exposure_snapshot_json: data.exposure_snapshot_json,
           action_payload_json: data.action_payload_json,
         };
-        document.getElementById("decisionDetailResult").textContent = JSON.stringify(formatted, null, 2);
+        document.getElementById("decisionDetailResult").textContent = formatJson(formatted);
         showBanner(detailBanner, "Decision detail loaded.", true);
       }
 
@@ -1209,7 +1263,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           original_reason_codes: data.original_reason_codes,
           replayed_reason_codes: data.replayed_reason_codes,
         };
-        document.getElementById("decisionReplayResult").textContent = JSON.stringify(formatted, null, 2);
+        document.getElementById("decisionReplayResult").textContent = formatJson(formatted);
         showBanner(
           replayBanner,
           data.matches_original ? "Replay matched original decision." : "Replay differs from original decision.",
@@ -1240,6 +1294,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           return;
         }
         showBanner(loadBanner, "Dashboard data loaded.", true);
+        lastRefreshed.textContent = `Last refreshed: ${new Date().toLocaleString()}`;
 
         renderRuntimeControls(data.runtime_controls);
         renderActivePolicy(data.active_policy);
@@ -1259,8 +1314,8 @@ def admin_dashboard_ui() -> HTMLResponse:
           ["credit_daily_total_amount_cents", data.exposure_metrics.credit_daily_total_amount_cents],
           ["financial_total_amount_cents", data.exposure_metrics.financial_total_amount_cents]
         ]);
-        document.getElementById("byActionType").textContent = JSON.stringify(data.decision_metrics.counts_by_action_type || {}, null, 2);
-        document.getElementById("byReasonCode").textContent = JSON.stringify(data.decision_metrics.counts_by_reason_code || {}, null, 2);
+        document.getElementById("byActionType").textContent = formatJson(data.decision_metrics.counts_by_action_type || {});
+        document.getElementById("byReasonCode").textContent = formatJson(data.decision_metrics.counts_by_reason_code || {});
         resetRecentDecisionsPagination(getDecisionFilterValues());
         await loadRecentDecisions(currentDecisionFilters);
 

@@ -18,6 +18,7 @@ def test_admin_dashboard_ui_includes_key_sections(client: TestClient) -> None:
     assert "Exposure Metrics" in html
     assert "Recent Decisions" in html
     assert "Refresh Dashboard" in html
+    assert "Last refreshed" in html
     assert "Apply Controls" in html
     assert "Simulation" in html
     assert "Run Simulation" in html
