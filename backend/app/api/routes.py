@@ -225,6 +225,17 @@ def admin_dashboard_ui() -> HTMLResponse:
       .input-small { min-width: 0; width: 100%; }
       .section-note { color: var(--muted); margin-top: 0; margin-bottom: 10px; }
       .row-active { background: #eef8f1; }
+      .row-selected { background: #edf4ff; }
+      .reason-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+      .id-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+      .id-pill {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        background: #f3f6fa;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 4px 8px;
+      }
       .helper {
         margin: 0 0 10px;
         color: var(--muted);
@@ -499,7 +510,7 @@ def admin_dashboard_ui() -> HTMLResponse:
 
         <section class="card">
           <h2>Recent Decisions</h2>
-          <p class="helper">Newest decision events first. Use filters for targeted inspection, then View or Replay any row.</p>
+          <p class="helper">Newest decision events first. Use filters for targeted inspection, then View or Replay any row. Detail and replay panels below track the selected decision.</p>
           <div class="form-grid" style="margin-bottom: 10px;">
             <label>
               action_type
@@ -545,6 +556,29 @@ def admin_dashboard_ui() -> HTMLResponse:
           </table>
           <div class="toolbar" style="margin-top: 10px;">
             <button id="loadMoreDecisionsBtn" class="button">Load More</button>
+          </div>
+          <div class="grid" style="margin-top: 12px;">
+            <div class="card" style="padding: 12px;">
+              <h3>Decision Detail</h3>
+              <p class="helper">Stored event payload and exposure snapshot for the selected row.</p>
+              <div id="selectedDecisionIds" class="id-line">
+                <span class="muted">No decision selected yet.</span>
+              </div>
+              <div id="detailBanner" class="banner hidden"></div>
+              <details class="json-block" open>
+                <summary>Decision Detail JSON</summary>
+                <pre id="decisionDetailResult">Select View from a recent decision row to inspect details.</pre>
+              </details>
+            </div>
+            <div class="card" style="padding: 12px;">
+              <h3>Replay Result</h3>
+              <p class="helper">Replay recomputes a historical decision using stored policy version and exposure snapshot.</p>
+              <div id="replayBanner" class="banner hidden"></div>
+              <details class="json-block" open>
+                <summary>Replay Result JSON</summary>
+                <pre id="decisionReplayResult">Select Replay from a recent decision row to run deterministic replay.</pre>
+              </details>
+            </div>
           </div>
         </section>
 
@@ -593,25 +627,6 @@ def admin_dashboard_ui() -> HTMLResponse:
           </details>
         </section>
 
-        <section class="card">
-          <h2>Decision Detail</h2>
-          <p class="helper">View the stored event payload and exposure snapshot used at decision time.</p>
-          <div id="detailBanner" class="banner hidden"></div>
-          <details class="json-block" open>
-            <summary>Decision Detail JSON</summary>
-            <pre id="decisionDetailResult">Select View from a recent decision row to inspect details.</pre>
-          </details>
-        </section>
-
-        <section class="card">
-          <h2>Replay Result</h2>
-          <p class="helper">Replay recomputes a historical decision using stored policy version and exposure snapshot only.</p>
-          <div id="replayBanner" class="banner hidden"></div>
-          <details class="json-block" open>
-            <summary>Replay Result JSON</summary>
-            <pre id="decisionReplayResult">Select Replay from a recent decision row to run deterministic replay.</pre>
-          </details>
-        </section>
       </div>
     </div>
 
@@ -653,6 +668,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       let recentDecisionsOffset = 0;
       let recentDecisionsHasMore = true;
       let currentDecisionFilters = { action_type: "", decision: "", request_id: "" };
+      let selectedDecisionEventId = null;
 
       function showBanner(node, message, ok) {
         node.textContent = message;
@@ -684,6 +700,66 @@ def admin_dashboard_ui() -> HTMLResponse:
         if (value === "ESCALATE") return "chip chip-warn";
         if (value === "BLOCK") return "chip chip-bad";
         return "chip";
+      }
+
+      async function copyToClipboard(value, label) {
+        if (!value) {
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(String(value));
+          showBanner(detailBanner, `${label} copied.`, true);
+        } catch {
+          showBanner(detailBanner, `Unable to copy ${label}.`, false);
+        }
+      }
+
+      function updateSelectedDecisionIds(detail) {
+        const container = document.getElementById("selectedDecisionIds");
+        container.innerHTML = "";
+        if (!detail) {
+          container.innerHTML = '<span class="muted">No decision selected yet.</span>';
+          return;
+        }
+
+        const idEntries = [
+          ["event_id", detail.event_id],
+          ["request_id", detail.request_id],
+          ["policy_id", detail.policy_id || "none"],
+        ];
+        for (const [label, value] of idEntries) {
+          const pill = document.createElement("span");
+          pill.className = "id-pill";
+          pill.textContent = `${label}: ${value}`;
+          container.appendChild(pill);
+
+          if (value && value !== "none") {
+            const copyBtn = document.createElement("button");
+            copyBtn.className = "button";
+            copyBtn.textContent = `Copy ${label}`;
+            copyBtn.addEventListener("click", () => copyToClipboard(value, label));
+            container.appendChild(copyBtn);
+          }
+        }
+      }
+
+      function markSelectedDecisionRow(eventId) {
+        selectedDecisionEventId = eventId;
+        const rows = document.querySelectorAll("#recentDecisionsBody tr");
+        for (const row of rows) {
+          if (row.getAttribute("data-event-id") === eventId) {
+            row.classList.add("row-selected");
+          } else {
+            row.classList.remove("row-selected");
+          }
+        }
+      }
+
+      function renderReasonCodeChips(reasonCodes) {
+        if (!reasonCodes || !reasonCodes.length) {
+          return "-";
+        }
+        return `<div class="reason-tags">${reasonCodes.map((code) => `<span class="chip">${code}</span>`).join("")}</div>`;
       }
 
       function renderMetricGrid(nodeId, metrics) {
@@ -760,7 +836,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         const sorted = [...items].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
         for (const item of sorted) {
           const tr = document.createElement("tr");
-          const reasonCodes = (item.reason_codes || []).join(", ") || "-";
+          tr.setAttribute("data-event-id", item.event_id);
           const decisionClass = chipClassForDecision(item.decision);
           const wouldDecisionClass = chipClassForDecision(item.would_decision);
           tr.innerHTML = `
@@ -768,11 +844,20 @@ def admin_dashboard_ui() -> HTMLResponse:
             <td>${item.action_type}</td>
             <td><span class="${decisionClass}">${item.decision}</span></td>
             <td>${item.would_decision ? `<span class="${wouldDecisionClass}">${item.would_decision}</span>` : "-"}</td>
-            <td>${reasonCodes}</td>
+            <td>${renderReasonCodeChips(item.reason_codes || [])}</td>
             <td><button class="button" data-action="view">View</button> <button class="button" data-action="replay">Replay</button></td>
           `;
-          tr.querySelector('[data-action="view"]').addEventListener("click", () => loadDecisionDetail(item.event_id));
-          tr.querySelector('[data-action="replay"]').addEventListener("click", () => replayDecision(item.event_id));
+          if (item.event_id === selectedDecisionEventId) {
+            tr.classList.add("row-selected");
+          }
+          tr.querySelector('[data-action="view"]').addEventListener("click", () => {
+            markSelectedDecisionRow(item.event_id);
+            loadDecisionDetail(item.event_id);
+          });
+          tr.querySelector('[data-action="replay"]').addEventListener("click", () => {
+            markSelectedDecisionRow(item.event_id);
+            replayDecision(item.event_id);
+          });
           tbody.appendChild(tr);
         }
       }
@@ -828,6 +913,8 @@ def admin_dashboard_ui() -> HTMLResponse:
         const rows = data || [];
         renderRecentDecisions(rows, append);
         if (!append && rows.length === 0) {
+          selectedDecisionEventId = null;
+          updateSelectedDecisionIds(null);
           recentDecisionsHasMore = false;
           updateLoadMoreButton();
           showBanner(decisionFiltersBanner, "No decisions found for current filters.", true);
@@ -1353,6 +1440,8 @@ def admin_dashboard_ui() -> HTMLResponse:
       }
 
       function setLoadingState() {
+        selectedDecisionEventId = null;
+        updateSelectedDecisionIds(null);
         document.getElementById("runtimeText").textContent = "Loading runtime controls...";
         document.getElementById("activePolicyState").textContent = "Loading policy...";
         document.getElementById("activePolicyRules").textContent = "{}";
@@ -1365,6 +1454,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       }
 
       async function loadDecisionDetail(eventId) {
+        markSelectedDecisionRow(eventId);
         hideBanner(detailBanner);
         document.getElementById("decisionDetailResult").textContent = "Loading decision detail...";
         const response = await fetch(`/v1/admin/decisions/${eventId}`, { headers: getHeaders() });
@@ -1392,11 +1482,13 @@ def admin_dashboard_ui() -> HTMLResponse:
           exposure_snapshot_json: data.exposure_snapshot_json,
           action_payload_json: data.action_payload_json,
         };
+        updateSelectedDecisionIds(formatted);
         document.getElementById("decisionDetailResult").textContent = formatJson(formatted);
         showBanner(detailBanner, "Decision detail loaded.", true);
       }
 
       async function replayDecision(eventId) {
+        markSelectedDecisionRow(eventId);
         hideBanner(replayBanner);
         document.getElementById("decisionReplayResult").textContent = "Running replay...";
         const response = await fetch(`/v1/admin/decisions/${eventId}/replay`, {

@@ -40,6 +40,7 @@ def test_admin_dashboard_ui_includes_key_sections(client: TestClient) -> None:
     assert "View / Replay" in html
     assert "Decision Detail" in html
     assert "Replay Result" in html
+    assert "No decision selected yet." in html
     assert "Apply Filters" in html
     assert "Clear Filters" in html
     assert "action_type" in html
