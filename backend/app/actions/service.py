@@ -32,6 +32,7 @@ def authorize_action(
     db: Session,
     exposure_store: ExposureStore,
 ) -> DecisionEvent:
+    normalized_input_json: dict[str, Any] | None = None
     existing_event = db.scalar(select(DecisionEvent).where(DecisionEvent.request_id == action.request_id))
     if existing_event is not None:
         return existing_event
@@ -48,10 +49,12 @@ def authorize_action(
             model_version=action.model_version,
             policy_type=DEFAULT_POLICY_TYPE,
             runtime_mode="kill_switch",
+            event_schema_version="1",
             policy_id=None,
             policy_version=None,
             exposure_snapshot_json=ExposureContext().model_dump(mode="json"),
             action_payload_json=action.payload_json,
+            normalized_input_json=normalized_input_json,
         )
         db.add(decision_event)
         db.commit()
@@ -60,6 +63,9 @@ def authorize_action(
 
     active_policy = load_active_policy(db)
     resolved_policy_type = active_policy.policy_type or DEFAULT_POLICY_TYPE
+    evaluator = get_evaluator(resolved_policy_type)
+    normalized_action = evaluator.normalize_action(action_type=action.action_type, payload=action.payload_json)
+    normalized_input_json = normalized_action.model_dump(mode="json")
     decision_ts = datetime.now(timezone.utc)
     decision_date = decision_ts.date()
     minute_bucket = decision_ts.strftime("%Y-%m-%dT%H:%M")
@@ -81,10 +87,12 @@ def authorize_action(
                 model_version=action.model_version,
                 policy_type=resolved_policy_type,
                 runtime_mode="enforce",
+                event_schema_version="1",
                 policy_id=active_policy.policy_id,
                 policy_version=active_policy.policy_version,
                 exposure_snapshot_json=ExposureContext().model_dump(mode="json"),
                 action_payload_json=action.payload_json,
+                normalized_input_json=normalized_input_json,
             )
             db.add(decision_event)
             db.commit()
@@ -97,8 +105,6 @@ def authorize_action(
             user_id=action.user_id,
             date=decision_date,
         ).model_copy(update={"financial_total_amount_cents": financial_total_amount_cents})
-        evaluator = get_evaluator(resolved_policy_type)
-        normalized_action = evaluator.normalize_action(action_type=action.action_type, payload=action.payload_json)
         typed_rules = evaluator.validate_rules(active_policy.rules.model_dump(mode="json"))
         typed_exposure = RefundCreditV1Exposure(
             daily_total_amount_cents=_to_cents(exposure_context.daily_total_amount),
@@ -151,10 +157,12 @@ def authorize_action(
         model_version=action.model_version,
         policy_type=resolved_policy_type,
         runtime_mode="observe_only" if kill_switch.observe_only else "enforce",
+        event_schema_version="1",
         policy_id=active_policy.policy_id,
         policy_version=active_policy.policy_version,
         exposure_snapshot_json=exposure_context.model_dump(mode="json"),
         action_payload_json=action.payload_json,
+        normalized_input_json=normalized_input_json,
     )
     db.add(decision_event)
     db.commit()

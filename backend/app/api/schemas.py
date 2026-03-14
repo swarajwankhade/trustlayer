@@ -124,10 +124,12 @@ class DecisionEventResponse(BaseModel):
     model_version: str | None
     policy_type: str | None
     runtime_mode: str | None
+    event_schema_version: str | None
     policy_id: UUID | None
     policy_version: int | None
     exposure_snapshot_json: dict[str, Any]
     action_payload_json: dict[str, Any] | None
+    normalized_input_json: dict[str, Any] | None
 
 
 class DecisionReplayResponse(BaseModel):

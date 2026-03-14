@@ -114,8 +114,13 @@ def test_first_refund_call_persists_one_decision_event(
     assert events[0].action_type == "refund"
     assert events[0].policy_type == "refund_credit_v1"
     assert events[0].runtime_mode == "enforce"
+    assert events[0].event_schema_version == "1"
     assert events[0].policy_id == policy_id
     assert events[0].policy_version == 2
+    assert events[0].normalized_input_json is not None
+    assert events[0].normalized_input_json["action_type"] == "refund"
+    assert events[0].normalized_input_json["amount_cents"] == 1000
+    assert events[0].normalized_input_json["user_id"] == "user-1"
     assert events[0].exposure_snapshot_json == {
         "daily_total_amount": "0.00",
         "per_user_daily_count": 0,
