@@ -13,6 +13,7 @@ class ActivePolicy:
     rules: PolicyRules
     policy_id: UUID | None = None
     policy_version: int | None = None
+    policy_type: str = "refund_credit_v1"
     base_reason_codes: list[str] = field(default_factory=list)
 
 
@@ -27,6 +28,7 @@ def load_active_policy(db: Session) -> ActivePolicy:
         return ActivePolicy(
             policy_id=None,
             policy_version=None,
+            policy_type="refund_credit_v1",
             rules=PolicyRules(
                 per_action_max_amount=None,
                 daily_total_cap_amount=None,
@@ -40,5 +42,6 @@ def load_active_policy(db: Session) -> ActivePolicy:
     return ActivePolicy(
         policy_id=policy.id,
         policy_version=policy.version,
+        policy_type=policy.policy_type or "refund_credit_v1",
         rules=PolicyRules.model_validate(policy.rules_json),
     )

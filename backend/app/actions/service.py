@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from app.exposure.store import ExposureStore, ExposureStoreUnavailableError
 from app.models import DecisionEvent, KillSwitch
 from app.config import get_settings
-from app.policies.engine import evaluate_action
+from app.evaluators import get_evaluator
+from app.evaluators.refund_credit_v1.schema import RefundCreditV1Exposure
 from app.policies.schemas import ExposureContext
 from app.policies.service import load_active_policy
 
@@ -58,6 +59,7 @@ def authorize_action(
         return decision_event
 
     active_policy = load_active_policy(db)
+    resolved_policy_type = active_policy.policy_type or DEFAULT_POLICY_TYPE
     decision_ts = datetime.now(timezone.utc)
     decision_date = decision_ts.date()
     minute_bucket = decision_ts.strftime("%Y-%m-%dT%H:%M")
@@ -77,7 +79,7 @@ def authorize_action(
                 would_decision=None,
                 would_reason_codes=None,
                 model_version=action.model_version,
-                policy_type=DEFAULT_POLICY_TYPE,
+                policy_type=resolved_policy_type,
                 runtime_mode="enforce",
                 policy_id=active_policy.policy_id,
                 policy_version=active_policy.policy_version,
@@ -95,11 +97,18 @@ def authorize_action(
             user_id=action.user_id,
             date=decision_date,
         ).model_copy(update={"financial_total_amount_cents": financial_total_amount_cents})
-        evaluated_decision, evaluated_reason_codes, _risk_metrics = evaluate_action(
-            amount=action.amount,
-            exposure_context=exposure_context,
-            policy=active_policy.rules,
+        evaluator = get_evaluator(resolved_policy_type)
+        normalized_action = evaluator.normalize_action(action_type=action.action_type, payload=action.payload_json)
+        typed_rules = evaluator.validate_rules(active_policy.rules.model_dump(mode="json"))
+        typed_exposure = RefundCreditV1Exposure(
+            daily_total_amount_cents=_to_cents(exposure_context.daily_total_amount),
+            per_user_daily_count=exposure_context.per_user_daily_count,
+            per_user_daily_amount_cents=_to_cents(exposure_context.per_user_daily_amount),
+            financial_total_amount_cents=exposure_context.financial_total_amount_cents,
         )
+        evaluation = evaluator.evaluate(action=normalized_action, exposure_context=typed_exposure, rules=typed_rules)
+        evaluated_decision = evaluation.decision
+        evaluated_reason_codes = evaluation.reason_codes
         actual_reason_codes = active_policy.base_reason_codes + evaluated_reason_codes
         if not kill_switch.observe_only and evaluated_decision == "ALLOW":
             exposure_store.apply_allow(
@@ -140,7 +149,7 @@ def authorize_action(
         would_decision=would_decision,
         would_reason_codes=would_reason_codes,
         model_version=action.model_version,
-        policy_type=DEFAULT_POLICY_TYPE,
+        policy_type=resolved_policy_type,
         runtime_mode="observe_only" if kill_switch.observe_only else "enforce",
         policy_id=active_policy.policy_id,
         policy_version=active_policy.policy_version,
@@ -167,3 +176,7 @@ def get_or_init_kill_switch(db: Session) -> KillSwitch:
         db.commit()
         db.refresh(kill_switch)
     return kill_switch
+
+
+def _to_cents(amount: Decimal) -> int:
+    return int((amount * Decimal("100")).quantize(Decimal("1")))
