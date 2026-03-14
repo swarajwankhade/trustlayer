@@ -40,9 +40,10 @@ from app.api.schemas import (
 from app.config import get_settings
 from app.db.session import get_db_session, get_engine
 from app.devtools.service import bootstrap_demo_data, generate_demo_decisions, reset_dev_data
+from app.evaluators import get_evaluator
+from app.evaluators.refund_credit_v1 import RefundCreditV1Exposure
 from app.exposure.store import ExposureStore, get_exposure_store
 from app.models import DecisionEvent, Policy
-from app.policies.engine import evaluate_action
 from app.policies.schemas import ExposureContext, PolicyRules
 from app.policies.service import ActivePolicy, load_active_policy
 
@@ -1829,7 +1830,8 @@ def create_policy(payload: CreatePolicyRequest, db: Session = Depends(get_db_ses
 @v1_router.post("/admin/policies/validate", response_model=ValidatePolicyResponse)
 def validate_policy(payload: ValidatePolicyRequest) -> ValidatePolicyResponse:
     try:
-        PolicyRules.model_validate(payload.rules_json)
+        evaluator = get_evaluator(DEFAULT_POLICY_TYPE)
+        evaluator.validate_rules(payload.rules_json)
         return ValidatePolicyResponse(valid=True, errors=[], warnings=[])
     except ValidationError as exc:
         errors = [f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}" for err in exc.errors()]
@@ -2020,29 +2022,32 @@ def replay_decision(event_id: UUID, db: Session = Depends(get_db_session)) -> De
             detail="Stored action payload is missing for replay",
         )
 
+    resolved_policy_type = event.policy_type or policy.policy_type or DEFAULT_POLICY_TYPE
+    evaluator = get_evaluator(resolved_policy_type)
     try:
-        amount = _extract_amount_from_payload(event.action_type, event.action_payload_json)
-    except ValidationError as exc:
+        normalized_action = evaluator.normalize_action(
+            action_type=event.action_type,
+            payload=event.action_payload_json,
+        )
+    except (ValidationError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Stored action payload is invalid for replay: {exc}",
         ) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     try:
-        policy_rules = PolicyRules.model_validate(policy.rules_json)
-        exposure_context = ExposureContext.model_validate(event.exposure_snapshot_json)
+        typed_rules = evaluator.validate_rules(policy.rules_json)
+        exposure_context = _deserialize_exposure_context(event.exposure_snapshot_json)
     except ValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Stored policy or exposure snapshot is invalid for replay: {exc}",
         ) from exc
 
-    replayed_decision, replayed_reason_codes, _ = evaluate_action(
-        amount=amount,
-        exposure_context=exposure_context,
-        policy=policy_rules,
+    replayed = evaluator.evaluate(
+        action=normalized_action,
+        exposure_context=_to_typed_exposure(exposure_context),
+        rules=typed_rules,
     )
     original_decision = event.would_decision if event.would_decision is not None else event.decision
     original_reason_codes = (
@@ -2055,9 +2060,9 @@ def replay_decision(event_id: UUID, db: Session = Depends(get_db_session)) -> De
         original_reason_codes=event.reason_codes,
         original_would_decision=event.would_decision,
         original_would_reason_codes=event.would_reason_codes,
-        replayed_decision=replayed_decision,
-        replayed_reason_codes=replayed_reason_codes,
-        matches_original=(original_decision == replayed_decision and original_reason_codes == replayed_reason_codes),
+        replayed_decision=replayed.decision,
+        replayed_reason_codes=replayed.reason_codes,
+        matches_original=(original_decision == replayed.decision and original_reason_codes == replayed.reason_codes),
     )
 
 
@@ -2065,18 +2070,24 @@ def replay_decision(event_id: UUID, db: Session = Depends(get_db_session)) -> De
 def simulate_action(payload: SimulationRequest, db: Session = Depends(get_db_session)) -> SimulationResponse:
     policy_context = _load_simulation_policy(db, payload)
     exposure_context = _resolve_simulation_exposure(payload)
-    amount = _extract_simulation_amount(payload)
+    policy_type = policy_context.policy_type or DEFAULT_POLICY_TYPE
+    evaluator = get_evaluator(policy_type)
+    typed_rules = evaluator.validate_rules(policy_context.rules.model_dump(mode="json"))
+    normalized_action = evaluator.normalize_action(
+        action_type=payload.action_type,
+        payload=_extract_simulation_action_payload(payload),
+    )
 
-    decision, reason_codes, _risk_metrics = evaluate_action(
-        amount=amount,
-        exposure_context=exposure_context,
-        policy=policy_context.rules,
+    evaluated = evaluator.evaluate(
+        action=normalized_action,
+        exposure_context=_to_typed_exposure(exposure_context),
+        rules=typed_rules,
     )
 
     return SimulationResponse(
         action_type=payload.action_type,
-        decision=decision,
-        reason_codes=policy_context.base_reason_codes + reason_codes,
+        decision=evaluated.decision,
+        reason_codes=policy_context.base_reason_codes + evaluated.reason_codes,
         policy_id=policy_context.policy_id,
         policy_version=policy_context.policy_version,
         exposure_context_used=exposure_context.model_dump(mode="json"),
@@ -2208,16 +2219,6 @@ def _serialize_payload(payload: BaseModel) -> dict[str, Any]:
     return payload.model_dump(mode="json")
 
 
-def _extract_amount_from_payload(action_type: str, payload: dict[str, Any]) -> Decimal:
-    if action_type == "refund":
-        parsed = RefundActionRequest.model_validate(payload)
-        return cents_to_decimal(parsed.refund_amount_cents)
-    if action_type == "credit_adjustment":
-        parsed = CreditActionRequest.model_validate(payload)
-        return cents_to_decimal(parsed.credit_amount_cents)
-    raise ValueError(f"Unsupported action_type for replay: {action_type}")
-
-
 def _load_simulation_policy(db: Session, payload: SimulationRequest) -> ActivePolicy:
     if payload.policy_id is None or payload.policy_version is None:
         return load_active_policy(db)
@@ -2233,6 +2234,7 @@ def _load_simulation_policy(db: Session, payload: SimulationRequest) -> ActivePo
     return ActivePolicy(
         policy_id=policy.id,
         policy_version=policy.version,
+        policy_type=policy.policy_type or DEFAULT_POLICY_TYPE,
         rules=PolicyRules.model_validate(policy.rules_json),
     )
 
@@ -2249,20 +2251,41 @@ def _resolve_simulation_exposure(payload: SimulationRequest) -> ExposureContext:
     )
 
 
-def _extract_simulation_amount(payload: SimulationRequest) -> Decimal:
+def _extract_simulation_action_payload(payload: SimulationRequest) -> dict[str, Any]:
     if payload.action_type == "refund":
         if payload.refund is None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="refund payload is required")
-        return cents_to_decimal(payload.refund.refund_amount_cents)
+        return payload.refund.model_dump(mode="json")
     if payload.action_type == "credit_adjustment":
         if payload.credit is None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="credit payload is required")
-        return cents_to_decimal(payload.credit.credit_amount_cents)
+        return payload.credit.model_dump(mode="json")
     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported action_type")
 
 
 def _decimal_to_cents(amount: Decimal) -> int:
     return int((amount * Decimal("100")).quantize(Decimal("1")))
+
+
+def _to_typed_exposure(exposure_context: ExposureContext) -> RefundCreditV1Exposure:
+    return RefundCreditV1Exposure(
+        daily_total_amount_cents=_decimal_to_cents(exposure_context.daily_total_amount),
+        per_user_daily_count=exposure_context.per_user_daily_count,
+        per_user_daily_amount_cents=_decimal_to_cents(exposure_context.per_user_daily_amount),
+        financial_total_amount_cents=exposure_context.financial_total_amount_cents,
+    )
+
+
+def _deserialize_exposure_context(exposure_snapshot: dict[str, Any]) -> ExposureContext:
+    if "daily_total_amount" in exposure_snapshot:
+        return ExposureContext.model_validate(exposure_snapshot)
+    typed = RefundCreditV1Exposure.model_validate(exposure_snapshot)
+    return ExposureContext(
+        daily_total_amount=cents_to_decimal(typed.daily_total_amount_cents),
+        per_user_daily_count=typed.per_user_daily_count,
+        per_user_daily_amount=cents_to_decimal(typed.per_user_daily_amount_cents),
+        financial_total_amount_cents=typed.financial_total_amount_cents,
+    )
 
 
 def _postgres_ready() -> bool:

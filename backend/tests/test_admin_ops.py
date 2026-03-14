@@ -4,9 +4,10 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
+from app.api import routes as api_routes
 from app.api.dependencies import require_api_key
 from app.db.session import get_db_session, get_session_factory
 from app.exposure.store import get_exposure_store
@@ -345,6 +346,85 @@ def test_replay_returns_matching_decision_and_does_not_create_new_event(
     db_session.commit()
 
 
+def test_replay_uses_evaluator_registry(
+    authorized_client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy_id = insert_active_policy(db_session, version=62)
+    request_id = f"req-{uuid.uuid4()}"
+
+    create_response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": request_id,
+            "user_id": "user-replay-registry",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 1000,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+    assert create_response.status_code == 200
+    event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    assert event is not None
+
+    real_get_evaluator = api_routes.get_evaluator
+    requested_policy_types: list[str] = []
+
+    def _spy_get_evaluator(policy_type: str):
+        requested_policy_types.append(policy_type)
+        return real_get_evaluator(policy_type)
+
+    monkeypatch.setattr(api_routes, "get_evaluator", _spy_get_evaluator)
+
+    replay_response = authorized_client.post(f"/v1/admin/decisions/{event.event_id}/replay")
+    assert replay_response.status_code == 200
+    assert requested_policy_types == ["refund_credit_v1"]
+
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_replay_defaults_to_refund_credit_v1_when_policy_type_missing_on_legacy_event(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    policy_id = insert_active_policy(db_session, version=63)
+    request_id = f"req-{uuid.uuid4()}"
+
+    create_response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": request_id,
+            "user_id": "user-replay-legacy-type",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 1000,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+    assert create_response.status_code == 200
+    event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    assert event is not None
+
+    db_session.execute(update(DecisionEvent).where(DecisionEvent.event_id == event.event_id).values(policy_type=None))
+    db_session.execute(update(Policy).where(Policy.id == policy_id).values(policy_type=None))
+    db_session.commit()
+
+    replay_response = authorized_client.post(f"/v1/admin/decisions/{event.event_id}/replay")
+    assert replay_response.status_code == 200
+    assert replay_response.json()["matches_original"] is True
+    assert replay_response.json()["replayed_decision"] == "ALLOW"
+
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
 def test_replay_uses_stored_policy_version_not_current_active(
     authorized_client: TestClient, db_session: Session
 ) -> None:
@@ -475,6 +555,41 @@ def test_simulate_refund_with_active_policy(authorized_client: TestClient, db_se
     db_session.commit()
 
 
+def test_simulate_uses_evaluator_registry(
+    authorized_client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy_id = insert_active_policy(db_session, version=86, per_action_max_amount=2_000)
+    real_get_evaluator = api_routes.get_evaluator
+    requested_policy_types: list[str] = []
+
+    def _spy_get_evaluator(policy_type: str):
+        requested_policy_types.append(policy_type)
+        return real_get_evaluator(policy_type)
+
+    monkeypatch.setattr(api_routes, "get_evaluator", _spy_get_evaluator)
+
+    response = authorized_client.post(
+        "/v1/admin/simulate",
+        json={
+            "action_type": "refund",
+            "refund": {
+                "user_id": "user-sim-registry",
+                "refund_amount_cents": 1000,
+                "currency": "USD",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "ALLOW"
+    assert requested_policy_types == ["refund_credit_v1"]
+
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
 def test_simulate_credit_with_active_policy(authorized_client: TestClient, db_session: Session) -> None:
     policy_id = insert_active_policy(db_session, version=81, per_action_max_amount=2_000)
 
@@ -529,6 +644,36 @@ def test_simulate_uses_explicit_policy_id_and_version(
     assert body["decision"] == "BLOCK"
 
     db_session.execute(delete(Policy).where(Policy.id.in_([active_policy_id, explicit_policy_id])))
+    db_session.commit()
+
+
+def test_simulate_defaults_to_refund_credit_v1_when_policy_type_missing(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    policy_id = insert_active_policy(db_session, version=87, per_action_max_amount=2_000)
+    db_session.execute(update(Policy).where(Policy.id == policy_id).values(policy_type=None))
+    db_session.commit()
+
+    response = authorized_client.post(
+        "/v1/admin/simulate",
+        json={
+            "action_type": "refund",
+            "refund": {
+                "user_id": "user-sim-legacy-type",
+                "refund_amount_cents": 1000,
+                "currency": "USD",
+            },
+            "policy_id": str(policy_id),
+            "policy_version": 87,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"] == "ALLOW"
+    assert response.json()["policy_id"] == str(policy_id)
+
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
     db_session.commit()
 
 
