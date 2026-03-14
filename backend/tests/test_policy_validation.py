@@ -90,6 +90,7 @@ def test_policy_validation_does_not_create_policy_rows(authorized_client: TestCl
             name=baseline_name,
             version=1,
             status="INACTIVE",
+            policy_type="refund_credit_v1",
             rules_json={
                 "per_action_max_amount": 10_000,
                 "daily_total_cap_amount": 20_000,
@@ -169,6 +170,38 @@ def test_policy_validation_uses_evaluator_registry(
                 "per_user_daily_amount_cap": 20_000,
                 "near_cap_escalation_ratio": 0.9,
             }
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is True
+    assert requested_policy_types == ["refund_credit_v1"]
+
+
+def test_policy_validation_accepts_explicit_policy_type(
+    authorized_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_get_evaluator = api_routes.get_evaluator
+    requested_policy_types: list[str] = []
+
+    def _spy_get_evaluator(policy_type: str):
+        requested_policy_types.append(policy_type)
+        return real_get_evaluator(policy_type)
+
+    monkeypatch.setattr(api_routes, "get_evaluator", _spy_get_evaluator)
+
+    response = authorized_client.post(
+        "/v1/admin/policies/validate",
+        json={
+            "policy_type": "refund_credit_v1",
+            "rules_json": {
+                "per_action_max_amount": 10_000,
+                "daily_total_cap_amount": 20_000,
+                "per_user_daily_count_cap": 10,
+                "per_user_daily_amount_cap": 20_000,
+                "near_cap_escalation_ratio": 0.9,
+            },
         },
     )
 

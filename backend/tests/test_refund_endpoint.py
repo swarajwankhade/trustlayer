@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.actions import service as action_service
@@ -166,14 +166,12 @@ def test_live_refund_path_uses_evaluator_registry(
     db_session.commit()
 
 
-def test_legacy_policy_without_policy_type_defaults_to_refund_credit_v1(
+def test_refund_persists_policy_type_on_decision_event(
     authorized_client: TestClient,
     db_session: Session,
 ) -> None:
     request_id = f"req-{uuid.uuid4()}"
     policy_id = insert_active_policy(db_session, version=22)
-    db_session.execute(update(Policy).where(Policy.id == policy_id).values(policy_type=None))
-    db_session.commit()
 
     response = authorized_client.post(
         "/v1/actions/refund",

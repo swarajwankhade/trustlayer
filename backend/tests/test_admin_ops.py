@@ -388,7 +388,7 @@ def test_replay_uses_evaluator_registry(
     db_session.commit()
 
 
-def test_replay_defaults_to_refund_credit_v1_when_policy_type_missing_on_legacy_event(
+def test_replay_falls_back_to_policy_row_policy_type_when_event_policy_type_missing(
     authorized_client: TestClient,
     db_session: Session,
 ) -> None:
@@ -412,7 +412,6 @@ def test_replay_defaults_to_refund_credit_v1_when_policy_type_missing_on_legacy_
     assert event is not None
 
     db_session.execute(update(DecisionEvent).where(DecisionEvent.event_id == event.event_id).values(policy_type=None))
-    db_session.execute(update(Policy).where(Policy.id == policy_id).values(policy_type=None))
     db_session.commit()
 
     replay_response = authorized_client.post(f"/v1/admin/decisions/{event.event_id}/replay")
@@ -647,13 +646,28 @@ def test_simulate_uses_explicit_policy_id_and_version(
     db_session.commit()
 
 
-def test_simulate_defaults_to_refund_credit_v1_when_policy_type_missing(
+def test_simulate_works_with_policy_created_without_explicit_policy_type(
     authorized_client: TestClient,
     db_session: Session,
 ) -> None:
-    policy_id = insert_active_policy(db_session, version=87, per_action_max_amount=2_000)
-    db_session.execute(update(Policy).where(Policy.id == policy_id).values(policy_type=None))
-    db_session.commit()
+    create_response = authorized_client.post(
+        "/v1/admin/policies",
+        json={
+            "name": f"sim-legacy-default-{uuid.uuid4().hex}",
+            "version": 87,
+            "rules_json": {
+                "per_action_max_amount": 2_000,
+                "daily_total_cap_amount": 50_000,
+                "per_user_daily_count_cap": 5,
+                "per_user_daily_amount_cap": 20_000,
+                "near_cap_escalation_ratio": 0.9,
+            },
+            "created_by": "pytest",
+        },
+    )
+    assert create_response.status_code == 201
+    policy_id = create_response.json()["id"]
+    assert create_response.json()["policy_type"] == "refund_credit_v1"
 
     response = authorized_client.post(
         "/v1/admin/simulate",
@@ -664,16 +678,16 @@ def test_simulate_defaults_to_refund_credit_v1_when_policy_type_missing(
                 "refund_amount_cents": 1000,
                 "currency": "USD",
             },
-            "policy_id": str(policy_id),
+            "policy_id": policy_id,
             "policy_version": 87,
         },
     )
 
     assert response.status_code == 200
     assert response.json()["decision"] == "ALLOW"
-    assert response.json()["policy_id"] == str(policy_id)
+    assert response.json()["policy_id"] == policy_id
 
-    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.execute(delete(Policy).where(Policy.id == uuid.UUID(policy_id)))
     db_session.commit()
 
 

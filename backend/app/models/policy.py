@@ -20,7 +20,7 @@ class Policy(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
-    policy_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    policy_type: Mapped[str] = mapped_column(String(64), nullable=False)
     rules_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)

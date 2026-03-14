@@ -58,6 +58,7 @@ def test_list_policies_returns_created_policies(authorized_client: TestClient, d
         name=name_one,
         version=version_one,
         status="INACTIVE",
+        policy_type="refund_credit_v1",
         rules_json={
             "per_action_max_amount": 10_000,
             "daily_total_cap_amount": 50_000,
@@ -72,6 +73,7 @@ def test_list_policies_returns_created_policies(authorized_client: TestClient, d
         name=name_two,
         version=version_two,
         status="INACTIVE",
+        policy_type="refund_credit_v1",
         rules_json={
             "per_action_max_amount": 20_000,
             "daily_total_cap_amount": 60_000,
@@ -136,9 +138,70 @@ def test_create_policy_validates_schema(authorized_client: TestClient, db_sessio
     assert valid_response.status_code == 201
     assert valid_response.json()["status"] == "INACTIVE"
     assert valid_response.json()["name"] == valid_name
+    assert valid_response.json()["policy_type"] == "refund_credit_v1"
     assert invalid_response.status_code == 422
 
     created_policy_id = uuid.UUID(valid_response.json()["id"])
+    db_session.execute(delete(Policy).where(Policy.id == created_policy_id))
+    db_session.commit()
+
+
+def test_create_policy_persists_explicit_policy_type(authorized_client: TestClient, db_session: Session) -> None:
+    name = _unique_name("create-explicit-policy-type")
+    version = _unique_version()
+
+    response = authorized_client.post(
+        "/v1/admin/policies",
+        json={
+            "name": name,
+            "version": version,
+            "policy_type": "refund_credit_v1",
+            "rules_json": {
+                "per_action_max_amount": 10_000,
+                "daily_total_cap_amount": 50_000,
+                "per_user_daily_count_cap": 5,
+                "per_user_daily_amount_cap": 20_000,
+                "near_cap_escalation_ratio": 0.9,
+            },
+            "created_by": "pytest",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["policy_type"] == "refund_credit_v1"
+
+    created_policy_id = uuid.UUID(response.json()["id"])
+    db_session.execute(delete(Policy).where(Policy.id == created_policy_id))
+    db_session.commit()
+
+
+def test_create_policy_defaults_policy_type_when_omitted(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    name = _unique_name("create-default-policy-type")
+    version = _unique_version()
+
+    response = authorized_client.post(
+        "/v1/admin/policies",
+        json={
+            "name": name,
+            "version": version,
+            "rules_json": {
+                "per_action_max_amount": 10_000,
+                "daily_total_cap_amount": 50_000,
+                "per_user_daily_count_cap": 5,
+                "per_user_daily_amount_cap": 20_000,
+                "near_cap_escalation_ratio": 0.9,
+            },
+            "created_by": "pytest",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["policy_type"] == "refund_credit_v1"
+
+    created_policy_id = uuid.UUID(response.json()["id"])
     db_session.execute(delete(Policy).where(Policy.id == created_policy_id))
     db_session.commit()
 
@@ -154,6 +217,7 @@ def test_activate_policy_makes_exactly_one_active(authorized_client: TestClient,
         name=name_one,
         version=version_one,
         status="ACTIVE",
+        policy_type="refund_credit_v1",
         rules_json={
             "per_action_max_amount": 10_000,
             "daily_total_cap_amount": 50_000,
@@ -168,6 +232,7 @@ def test_activate_policy_makes_exactly_one_active(authorized_client: TestClient,
         name=name_two,
         version=version_two,
         status="INACTIVE",
+        policy_type="refund_credit_v1",
         rules_json={
             "per_action_max_amount": 15_000,
             "daily_total_cap_amount": 55_000,
@@ -205,6 +270,7 @@ def test_active_policy_endpoint_returns_correct_version(authorized_client: TestC
         name=name_one,
         version=version_one,
         status="INACTIVE",
+        policy_type="refund_credit_v1",
         rules_json={
             "per_action_max_amount": 10_000,
             "daily_total_cap_amount": 50_000,
@@ -219,6 +285,7 @@ def test_active_policy_endpoint_returns_correct_version(authorized_client: TestC
         name=name_two,
         version=version_two,
         status="INACTIVE",
+        policy_type="refund_credit_v1",
         rules_json={
             "per_action_max_amount": 15_000,
             "daily_total_cap_amount": 55_000,

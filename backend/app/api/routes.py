@@ -341,13 +341,14 @@ def admin_dashboard_ui() -> HTMLResponse:
                 <th>policy_id</th>
                 <th>name</th>
                 <th>version</th>
+                <th>policy_type</th>
                 <th>status</th>
                 <th>created_at</th>
                 <th>actions (View Rules / Activate)</th>
               </tr>
             </thead>
             <tbody id="policiesTableBody">
-              <tr><td colspan="6" class="muted">Policies will load here.</td></tr>
+              <tr><td colspan="7" class="muted">Policies will load here.</td></tr>
             </tbody>
           </table>
           <details class="json-block" open>
@@ -395,6 +396,12 @@ def admin_dashboard_ui() -> HTMLResponse:
             <label>
               policy_version
               <input id="policyVersion" class="input input-small" type="number" min="1" step="1" placeholder="1" />
+            </label>
+            <label>
+              policy_type
+              <select id="policyType" class="input input-small">
+                <option value="refund_credit_v1" selected>refund_credit_v1</option>
+              </select>
             </label>
             <label>
               per_action_max_amount
@@ -858,6 +865,11 @@ def admin_dashboard_ui() -> HTMLResponse:
         versionChip.textContent = `Version: ${policy.version}`;
         badges.appendChild(versionChip);
 
+        const typeChip = document.createElement("span");
+        typeChip.className = "chip";
+        typeChip.textContent = `Type: ${policy.policy_type || "refund_credit_v1"}`;
+        badges.appendChild(typeChip);
+
         state.textContent = `Policy ID: ${policy.policy_id}`;
         rules.textContent = formatJson(policy.rules_json || {});
       }
@@ -1184,6 +1196,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           per_user_daily_amount_cap: parseRequiredPositiveInt("policyPerUserAmountCap", "per_user_daily_amount_cap"),
           near_cap_escalation_ratio: Number.parseFloat(document.getElementById("policyNearCapRatio").value),
         };
+        const policyType = document.getElementById("policyType").value.trim() || "refund_credit_v1";
 
         if (!name) {
           throw new Error("policy_name is required.");
@@ -1198,6 +1211,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         return {
           name: name,
           version: version,
+          policy_type: policyType,
           rules_json: rulesJson,
           created_by: document.getElementById("updatedBy").value.trim() || "operator-ui",
         };
@@ -1250,7 +1264,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         const tbody = document.getElementById("policiesTableBody");
         tbody.innerHTML = "";
         if (!policies.length) {
-          tbody.innerHTML = '<tr><td colspan="6" class="muted">No policies found.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" class="muted">No policies found.</td></tr>';
           return;
         }
 
@@ -1264,6 +1278,7 @@ def admin_dashboard_ui() -> HTMLResponse:
             <td>${policyId}</td>
             <td>${policy.name}</td>
             <td>${policy.version}</td>
+            <td>${policy.policy_type || "refund_credit_v1"}</td>
             <td>${policy.status}</td>
             <td>${policy.created_at || "-"}</td>
             <td><button class="button" data-action="view-rules">View Rules</button> <button class="button" data-action="activate">Activate</button></td>
@@ -1344,7 +1359,7 @@ def admin_dashboard_ui() -> HTMLResponse:
             ? "Invalid API key. Update the key and retry."
             : `Failed to load policies: ${JSON.stringify(data)}`;
           showBanner(policiesBanner, message, false);
-          document.getElementById("policiesTableBody").innerHTML = '<tr><td colspan="6" class="muted">Failed to load policies.</td></tr>';
+          document.getElementById("policiesTableBody").innerHTML = '<tr><td colspan="7" class="muted">Failed to load policies.</td></tr>';
           allPolicies = [];
           populatePolicyCompareSelectors([]);
           return;
@@ -1378,7 +1393,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         const response = await fetch("/v1/admin/policies/validate", {
           method: "POST",
           headers: getHeaders(),
-          body: JSON.stringify({ rules_json: payload.rules_json }),
+          body: JSON.stringify({ policy_type: payload.policy_type, rules_json: payload.rules_json }),
         });
         const data = await response.json();
         if (!response.ok) {
@@ -1437,8 +1452,13 @@ def admin_dashboard_ui() -> HTMLResponse:
 
         createdPolicyId = data.id;
         document.getElementById("activatePolicyId").value = createdPolicyId;
-        document.getElementById("policyEditorState").textContent = `Created policy_id: ${createdPolicyId}`;
-        showBanner(policyEditorBanner, `Policy created successfully. policy_id=${createdPolicyId}`, true);
+        document.getElementById("policyEditorState").textContent =
+          `Created policy_id: ${createdPolicyId} (policy_type=${data.policy_type || payload.policy_type})`;
+        showBanner(
+          policyEditorBanner,
+          `Policy created successfully. policy_id=${createdPolicyId} policy_type=${data.policy_type || payload.policy_type}`,
+          true
+        );
       }
 
       async function activatePolicyById(policyId, fromRow = false) {
@@ -1489,7 +1509,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         document.getElementById("runtimeText").textContent = "Loading runtime controls...";
         document.getElementById("activePolicyState").textContent = "Loading policy...";
         document.getElementById("activePolicyRules").textContent = "{}";
-        document.getElementById("policiesTableBody").innerHTML = '<tr><td colspan="6" class="muted">Loading policies...</td></tr>';
+        document.getElementById("policiesTableBody").innerHTML = '<tr><td colspan="7" class="muted">Loading policies...</td></tr>';
         document.getElementById("byActionType").textContent = "{}";
         document.getElementById("byReasonCode").textContent = "{}";
         renderMetricGrid("decisionMetricsGrid", [["total_decisions", "..."]]);
@@ -1808,16 +1828,19 @@ def list_policies(db: Session = Depends(get_db_session)) -> list[PolicyResponse]
 
 @v1_router.post("/admin/policies", response_model=PolicyResponse, status_code=status.HTTP_201_CREATED)
 def create_policy(payload: CreatePolicyRequest, db: Session = Depends(get_db_session)) -> PolicyResponse:
+    policy_type = payload.policy_type or DEFAULT_POLICY_TYPE
     try:
-        validated_rules = PolicyRules.model_validate(payload.rules_json)
-    except ValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+        evaluator = get_evaluator(policy_type)
+        validated_rules = evaluator.validate_rules(payload.rules_json)
+    except (ValidationError, ValueError) as exc:
+        detail = exc.errors() if isinstance(exc, ValidationError) else str(exc)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail) from exc
 
     policy = Policy(
         name=payload.name,
         version=payload.version,
         status="INACTIVE",
-        policy_type=DEFAULT_POLICY_TYPE,
+        policy_type=policy_type,
         rules_json=validated_rules.model_dump(mode="json"),
         created_by=payload.created_by,
     )
@@ -1829,11 +1852,14 @@ def create_policy(payload: CreatePolicyRequest, db: Session = Depends(get_db_ses
 
 @v1_router.post("/admin/policies/validate", response_model=ValidatePolicyResponse)
 def validate_policy(payload: ValidatePolicyRequest) -> ValidatePolicyResponse:
+    policy_type = payload.policy_type or DEFAULT_POLICY_TYPE
     try:
-        evaluator = get_evaluator(DEFAULT_POLICY_TYPE)
+        evaluator = get_evaluator(policy_type)
         evaluator.validate_rules(payload.rules_json)
         return ValidatePolicyResponse(valid=True, errors=[], warnings=[])
-    except ValidationError as exc:
+    except (ValidationError, ValueError) as exc:
+        if isinstance(exc, ValueError):
+            return ValidatePolicyResponse(valid=False, errors=[str(exc)], warnings=[])
         errors = [f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}" for err in exc.errors()]
         return ValidatePolicyResponse(valid=False, errors=errors, warnings=[])
 

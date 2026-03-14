@@ -40,11 +40,13 @@ class ActionDecisionResponse(BaseModel):
 class CreatePolicyRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     version: int = Field(gt=0)
+    policy_type: str | None = Field(default=None, min_length=1, max_length=64)
     rules_json: dict[str, Any]
     created_by: str = Field(min_length=1, max_length=255)
 
 
 class ValidatePolicyRequest(BaseModel):
+    policy_type: str | None = Field(default=None, min_length=1, max_length=64)
     rules_json: dict[str, Any]
 
 
