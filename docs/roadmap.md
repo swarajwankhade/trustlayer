@@ -110,6 +110,29 @@ TrustLayer becomes the **default trust layer for AI execution in enterprise envi
 
 ---
 
+# Evaluator Registry Expansion Path
+
+TrustLayer now uses `policy_type` + evaluator registry as the extension point for new policy families.
+
+How new policy types are introduced:
+
+1. Add evaluator module (typed schema, normalizer, evaluator).  
+2. Register evaluator in the registry by `policy_type`.  
+3. Create policies with that `policy_type` and evaluator-specific `rules_json`.  
+4. Reuse the existing action/simulation/replay/validation orchestration.
+
+This keeps the runtime pipeline stable while enabling domain-specific policy logic.
+
+Potential next policy families:
+
+• `fraud_risk_v1` (velocity/risk-gated escalation for suspicious activity)  
+• `chargeback_protection_v1` (loss exposure and dispute risk policies)  
+• `agent_governance_v1` (non-financial AI action governance and approval thresholds)
+
+Registry-first expansion keeps policy evolution incremental and testable without redesigning core API/control paths.
+
+---
+
 # Strategic Principle
 
 TrustLayer wins when organizations adopt the architecture:

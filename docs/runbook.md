@@ -178,3 +178,25 @@ Then rerun migrations and bootstrap.
 - Replay unavailable for some events:
   - Replay requires stored `policy_id` + `policy_version` and valid action payload.
   - Older/malformed rows may return clear replay errors.
+
+## 9) Evaluator Registry Notes (Operator/Debug)
+
+How evaluator selection works:
+
+- TrustLayer resolves evaluator from `policy_type`.
+- For normal runtime requests, `policy_type` comes from the active policy row.
+- For replay, TrustLayer prefers stored `decision_events.policy_type`; if missing on legacy events, it falls back to the referenced policy row type.
+- For simulation, evaluator is resolved from the explicit policy selection when provided, otherwise from active policy.
+
+Current supported evaluator:
+
+- `refund_credit_v1`
+
+Useful debugging checks:
+
+- Confirm active policy type:
+  - `GET /v1/admin/policies/active`
+- Confirm event evaluator metadata:
+  - `GET /v1/admin/decisions/{event_id}` (`policy_type`, `policy_version`)
+- Verify deterministic replay path:
+  - `POST /v1/admin/decisions/{event_id}/replay`

@@ -190,7 +190,28 @@ Response identical to refund endpoint.
 
 ---
 
-# 10. Policy Rules (MVP)
+# 10. Policy Types and Rules (MVP)
+
+Policies are typed.
+
+Each policy row includes:
+
+• `policy_type`  
+• `rules_json`
+
+`policy_type` selects the evaluator implementation through the evaluator registry.
+
+Current supported type:
+
+• `refund_credit_v1`
+
+If legacy callers omit `policy_type` in create/validate requests, TrustLayer defaults to `refund_credit_v1` for backward compatibility.
+
+Different policy types can define different `rules_json` schemas. The schema is validated by the selected evaluator.
+
+---
+
+# 11. Policy Rules (refund_credit_v1)
 
 Policy rules stored as JSON.
 
@@ -202,9 +223,38 @@ per_user_daily_count_cap
 per_user_daily_amount_cap  
 near_cap_escalation_ratio
 
+Example:
+
+```json
+{
+  "per_action_max_amount": 10000,
+  "daily_total_cap_amount": 20000,
+  "per_user_daily_count_cap": 10,
+  "per_user_daily_amount_cap": 20000,
+  "near_cap_escalation_ratio": 0.9
+}
+```
+
 ---
 
-# 11. Exposure Tracking
+# 12. Evaluator Resolution
+
+Decisioning paths resolve evaluator by `policy_type`:
+
+```text
+policy.policy_type -> evaluator registry -> evaluator.validate_rules/normalize_action/evaluate
+```
+
+Applies to:
+
+• live action authorization  
+• simulation  
+• replay  
+• policy validation
+
+---
+
+# 13. Exposure Tracking
 
 Exposure is tracked across both refunds and credits.
 
@@ -224,13 +274,14 @@ Counters increment only when decision = ALLOW.
 
 ---
 
-# 12. Data Model
+# 14. Data Model
 
 ## policies
 
 id  
 version  
 status  
+policy_type  
 rules_json  
 created_at  
 created_by
@@ -247,6 +298,8 @@ Append‑only ledger containing:
 • decision  
 • reason_codes  
 • model_version  
+• policy_type  
+• runtime_mode  
 • policy_id  
 • policy_version  
 • exposure_snapshot_json  
@@ -262,7 +315,7 @@ updated_by
 
 ---
 
-# 13. Failure Handling
+# 15. Failure Handling
 
 Redis unavailable → ESCALATE
 
@@ -274,7 +327,7 @@ TrustLayer must **fail safe rather than fail open**.
 
 ---
 
-# 14. Performance Targets
+# 16. Performance Targets
 
 Decision latency targets:
 
@@ -287,7 +340,7 @@ Availability target:
 
 ---
 
-# 15. Security
+# 17. Security
 
 Authentication via API keys.
 
@@ -300,7 +353,7 @@ Security principles:
 
 ---
 
-# 16. Operational Controls
+# 18. Operational Controls
 
 Operators can:
 
@@ -311,7 +364,7 @@ Operators can:
 
 ---
 
-# 17. Future Evolution (Architecture Direction)
+# 19. Future Evolution (Architecture Direction)
 
 TrustLayer evolves across several phases.
 

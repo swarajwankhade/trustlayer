@@ -140,7 +140,145 @@ Flow:
 
 ---
 
-# 4. Storage Architecture
+# 4. Control Plane vs Decision Plane
+
+TrustLayer now has a clearer internal split:
+
+Control Plane
+
+• Policy lifecycle (`create`, `validate`, `activate`)  
+• Runtime controls (`kill switch`, `observe_only`)  
+• Admin surfaces (dashboard, metrics, export)
+
+Decision Plane
+
+• Real-time action authorization (`/v1/actions/refund`, `/v1/actions/credit`)  
+• Evaluator resolution by `policy_type`  
+• Exposure retrieval / mutation in Redis  
+• Immutable decision event writes
+
+This is still one deployable service in MVP, but the internal boundaries are explicit.
+
+---
+
+# 5. Evaluator Registry Architecture
+
+TrustLayer uses a typed evaluator registry keyed by `policy_type`.
+
+```text
+policy.policy_type -> get_evaluator(policy_type) -> evaluator implementation
+```
+
+Current registry entry:
+
+• `refund_credit_v1`
+
+Registry responsibilities:
+
+• map `policy_type` to evaluator  
+• fail fast for unsupported types  
+• keep runtime behavior deterministic
+
+---
+
+# 6. Base Evaluator Contract
+
+Each evaluator implementation follows the same contract:
+
+```python
+class Evaluator(Protocol):
+    policy_type: str
+    def validate_rules(self, rules_json: dict[str, Any]) -> Any: ...
+    def normalize_action(self, action_type: str, payload: dict[str, Any]) -> Any: ...
+    def evaluate(self, action: Any, exposure_context: Any, rules: Any) -> EvaluationResult: ...
+```
+
+Design intent:
+
+• typed rules per `policy_type`  
+• typed normalization per action family  
+• pure deterministic evaluation output (`ALLOW` / `ESCALATE` / `BLOCK`, plus reason codes)
+
+---
+
+# 7. refund_credit_v1 Evaluator Structure
+
+Current evaluator family layout:
+
+```text
+app/evaluators/refund_credit_v1/
+  schema.py      # typed rules + typed exposure context
+  normalizer.py  # maps refund/credit payloads into normalized action
+  evaluator.py   # deterministic rule evaluation
+```
+
+Key behavior:
+
+• supports `refund` and `credit_adjustment`  
+• enforces per-action and daily caps  
+• computes near-cap escalation  
+• uses projected exposure values during evaluation
+
+---
+
+# 8. Decision Evaluation Pipeline (Current Runtime)
+
+Live action runtime sequence:
+
+```text
+1) API auth + request validation
+2) idempotency lookup by request_id
+3) kill switch / rate-limit operational guards
+4) active policy load (policy_type + rules_json)
+5) evaluator resolve by policy_type
+6) action normalization via evaluator
+7) exposure fetch + typed conversion
+8) evaluator.evaluate(...)
+9) observe_only transform (if enabled)
+10) decision_event append
+11) exposure increment only when effective decision is ALLOW in enforce mode
+```
+
+Replay and simulation reuse the same evaluator resolution + typed evaluation path, but remain read-only.
+
+---
+
+# 9. Decision Event Evidence Model
+
+`decision_events` are append-only evidence records. Important fields include:
+
+• request identity (`event_id`, `request_id`, `timestamp`)  
+• outcome (`decision`, `reason_codes`)  
+• evaluator metadata (`policy_id`, `policy_version`, `policy_type`, `runtime_mode`)  
+• observe-only evidence (`would_decision`, `would_reason_codes`)  
+• replay inputs (`action_payload_json`, `exposure_snapshot_json`)
+
+This shape supports:
+
+• deterministic replay  
+• post-incident investigation  
+• policy and evaluator attribution
+
+---
+
+# 10. Simulation and Replay Architecture
+
+Simulation (`POST /v1/admin/simulate`)
+
+• resolves evaluator using explicit policy or active policy  
+• defaults `policy_type` safely for legacy callers  
+• normalizes payload and evaluates without writing events or mutating Redis
+
+Replay (`POST /v1/admin/decisions/{event_id}/replay`)
+
+• loads stored event + referenced policy version  
+• resolves evaluator from stored `event.policy_type` (fallbacks for legacy rows)  
+• reconstructs normalized action + exposure snapshot  
+• re-evaluates read-only and compares with original/would decision
+
+---
+
+# 11. Storage Architecture
 
 TrustLayer uses two primary storage systems.
 
@@ -170,7 +308,7 @@ Redis is used only for short‑lived operational state.
 
 ---
 
-# 5. Failure Handling
+# 12. Failure Handling
 
 TrustLayer is designed to fail safe.
 
@@ -184,7 +322,7 @@ The system must never allow unsafe automation due to infrastructure failures.
 
 ---
 
-# 6. Reliability Principles
+# 13. Reliability Principles
 
 TrustLayer must operate as safety infrastructure.
 
@@ -197,7 +335,7 @@ Key principles:
 
 ---
 
-# 7. Future Architecture Evolution
+# 14. Future Architecture Evolution
 
 TrustLayer will evolve into a broader governance platform.
 
@@ -247,7 +385,7 @@ Design goals:
 
 ---
 
-# 8. Long‑Term Architecture Vision
+# 15. Long‑Term Architecture Vision
 
 TrustLayer becomes foundational infrastructure for AI execution.
 
