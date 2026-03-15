@@ -250,6 +250,9 @@ Replay and simulation reuse the same evaluator resolution + typed evaluation pat
 • request identity (`event_id`, `request_id`, `timestamp`)  
 • outcome (`decision`, `reason_codes`)  
 • evaluator metadata (`policy_id`, `policy_version`, `policy_type`, `runtime_mode`)  
+• evidence schema versioning (`event_schema_version`)  
+• normalized evaluator input (`normalized_input_json`)  
+• normalized input fingerprint (`normalized_input_hash`)  
 • observe-only evidence (`would_decision`, `would_reason_codes`)  
 • replay inputs (`action_payload_json`, `exposure_snapshot_json`)
 
@@ -273,7 +276,9 @@ Replay (`POST /v1/admin/decisions/{event_id}/replay`)
 
 • loads stored event + referenced policy version  
 • resolves evaluator from stored `event.policy_type` (fallbacks for legacy rows)  
-• reconstructs normalized action + exposure snapshot  
+• prefers stored `normalized_input_json` evidence when present  
+• falls back to reconstructing from `action_payload_json` for legacy rows  
+• reconstructs exposure snapshot  
 • re-evaluates read-only and compares with original/would decision
 
 ---

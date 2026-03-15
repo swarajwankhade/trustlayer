@@ -254,7 +254,35 @@ Applies to:
 
 ---
 
-# 13. Exposure Tracking
+# 13. Decision Event Evidence Model
+
+Decision events are evidence objects, not only logs.
+
+Core evidence fields:
+
+• `policy_type` (which evaluator family was used)  
+• `runtime_mode` (enforce / observe_only / kill_switch)  
+• `event_schema_version` (schema evolution marker)  
+• `normalized_input_json` (typed normalized action used for evaluation)  
+• `normalized_input_hash` (deterministic fingerprint of normalized input)
+
+Why normalized input exists:
+
+• replay/debug should use evaluator-ready inputs  
+• evidence remains stable even if raw request payload formats evolve
+
+Why the hash exists:
+
+• lightweight integrity/provenance check for normalized evidence  
+• quick equality checks across events with equivalent normalized inputs
+
+Hash approach (MVP):
+
+• deterministic JSON serialization + SHA-256
+
+---
+
+# 14. Exposure Tracking
 
 Exposure is tracked across both refunds and credits.
 
@@ -274,7 +302,7 @@ Counters increment only when decision = ALLOW.
 
 ---
 
-# 14. Data Model
+# 15. Data Model
 
 ## policies
 
@@ -300,10 +328,13 @@ Append‑only ledger containing:
 • model_version  
 • policy_type  
 • runtime_mode  
+• event_schema_version  
 • policy_id  
 • policy_version  
 • exposure_snapshot_json  
 • action_payload_json
+• normalized_input_json  
+• normalized_input_hash
 
 
 ## kill_switch
@@ -315,7 +346,7 @@ updated_by
 
 ---
 
-# 15. Failure Handling
+# 16. Failure Handling
 
 Redis unavailable → ESCALATE
 
@@ -327,7 +358,7 @@ TrustLayer must **fail safe rather than fail open**.
 
 ---
 
-# 16. Performance Targets
+# 17. Performance Targets
 
 Decision latency targets:
 
@@ -340,7 +371,7 @@ Availability target:
 
 ---
 
-# 17. Security
+# 18. Security
 
 Authentication via API keys.
 
@@ -353,7 +384,7 @@ Security principles:
 
 ---
 
-# 18. Operational Controls
+# 19. Operational Controls
 
 Operators can:
 
@@ -364,7 +395,7 @@ Operators can:
 
 ---
 
-# 19. Future Evolution (Architecture Direction)
+# 20. Future Evolution (Architecture Direction)
 
 TrustLayer evolves across several phases.
 

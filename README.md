@@ -1,6 +1,6 @@
 # TrustLayer
 
-TrustLayer is an AI execution control plane for financial automation.
+TrustLayer is an AI governance control plane for financial automation.
 
 It sits between AI systems and execution systems and authorizes:
 - `POST /v1/actions/refund`
@@ -14,12 +14,26 @@ Decisions are deterministic and returned as:
 ## MVP Capabilities
 
 - Refund + credit governance with shared authorization pipeline
-- Deterministic policy engine (caps + near-cap escalation)
+- Typed evaluator registry (`policy_type` -> evaluator)
+- `refund_credit_v1` evaluator family (rules schema + normalizer + evaluator)
+- Deterministic policy evaluation (caps + near-cap escalation)
 - Redis exposure tracking and combined financial caps
 - Idempotency by `request_id`
 - Append-only decision ledger in Postgres
 - Kill switch and observe-only runtime controls
-- Admin APIs for policies, decisions, metrics, simulation, dashboard, and export
+- Admin APIs for policies, simulation, replay, decisions, metrics, dashboard, and export
+
+## Evidence-Oriented Decision Events
+
+Decision events are durable evidence records. Key metadata includes:
+
+- `policy_type`
+- `runtime_mode`
+- `event_schema_version`
+- `normalized_input_json`
+- `normalized_input_hash`
+
+This keeps decision provenance explicit and replay/debug workflows deterministic.
 
 ## Service Endpoints
 
@@ -81,6 +95,23 @@ REDIS_URL=redis://localhost:6379/0 \
 PYTHONPATH=backend \
 uv run python scripts/reset_dev_data.py
 ```
+
+## Operator Demo Narrative
+
+Suggested short demo flow:
+
+1. Open dashboard: `GET /admin`, enter API key, click refresh.
+2. Use **Demo Helpers**:
+   - Seed Demo Policy
+   - Generate Demo Events
+3. Use **Simulation** to run a hypothetical refund/credit action.
+4. Open **Recent Decisions**:
+   - View decision detail
+   - Replay a decision
+5. Review **Decision Metrics** and **Exposure Metrics**.
+6. Inspect evidence fields on a decision:
+   - `policy_type`, `runtime_mode`, `event_schema_version`
+   - `normalized_input_json`, `normalized_input_hash`
 
 ## Important Admin Endpoints
 

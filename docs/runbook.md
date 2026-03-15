@@ -185,7 +185,9 @@ How evaluator selection works:
 
 - TrustLayer resolves evaluator from `policy_type`.
 - For normal runtime requests, `policy_type` comes from the active policy row.
+- `runtime_mode` indicates operational path (`enforce`, `observe_only`, `kill_switch`).
 - For replay, TrustLayer prefers stored `decision_events.policy_type`; if missing on legacy events, it falls back to the referenced policy row type.
+- Replay prefers stored normalized evidence (`normalized_input_json`) when present, and falls back to raw payload reconstruction for legacy rows.
 - For simulation, evaluator is resolved from the explicit policy selection when provided, otherwise from active policy.
 
 Current supported evaluator:
@@ -197,6 +199,10 @@ Useful debugging checks:
 - Confirm active policy type:
   - `GET /v1/admin/policies/active`
 - Confirm event evaluator metadata:
-  - `GET /v1/admin/decisions/{event_id}` (`policy_type`, `policy_version`)
+  - `GET /v1/admin/decisions/{event_id}`
+  - Inspect: `policy_type`, `policy_version`, `runtime_mode`, `event_schema_version`, `normalized_input_json`, `normalized_input_hash`
+- Confirm evidence appears in list/export responses:
+  - `GET /v1/admin/decisions`
+  - `GET /v1/admin/decisions/export`
 - Verify deterministic replay path:
   - `POST /v1/admin/decisions/{event_id}/replay`
