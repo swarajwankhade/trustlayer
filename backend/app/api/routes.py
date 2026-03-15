@@ -256,6 +256,22 @@ def admin_dashboard_ui() -> HTMLResponse:
         color: var(--muted);
         margin-top: 8px;
       }
+      .group-title {
+        grid-column: 1 / -1;
+        margin: 2px 0 0;
+        color: #1f3044;
+        font-size: 16px;
+      }
+      .group-note {
+        grid-column: 1 / -1;
+        margin: -8px 0 2px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
     </style>
   </head>
   <body>
@@ -289,6 +305,8 @@ def admin_dashboard_ui() -> HTMLResponse:
       </section>
 
       <div class="stack">
+        <h2 class="group-title">System Summary</h2>
+        <p class="group-note">Runtime controls, active policy, and current metrics.</p>
         <section class="card">
           <h2>Runtime Controls</h2>
           <p class="helper">Observe Only keeps responses as ALLOW while recording the underlying would-decision for safe rollout visibility.</p>
@@ -315,7 +333,7 @@ def admin_dashboard_ui() -> HTMLResponse:
             <button id="resetDemoBtn" class="button">Reset Demo Data</button>
           </div>
           <div id="demoHelpersBanner" class="banner hidden"></div>
-          <details class="json-block" open>
+          <details class="json-block">
             <summary>Demo Helper Result</summary>
             <pre id="demoHelpersResult">No demo helper action run yet.</pre>
           </details>
@@ -326,7 +344,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           <p class="helper">Current ACTIVE policy used by action evaluation.</p>
           <div id="policyBadges" class="chips"></div>
           <div id="activePolicyState" class="muted">Waiting for data.</div>
-          <details class="json-block" open>
+          <details class="json-block">
             <summary>Rules JSON</summary>
             <pre id="activePolicyRules">{}</pre>
           </details>
@@ -356,34 +374,36 @@ def admin_dashboard_ui() -> HTMLResponse:
             <summary>Policy Rules</summary>
             <pre id="policyRulesViewer">Select View Rules on a policy row to inspect rules_json.</pre>
           </details>
-          <h3>Policy Diff</h3>
-          <p class="helper">Compare two policy versions and view only changed rules fields.</p>
-          <div class="form-grid">
-            <label>
-              first policy selector
-              <select id="policyCompareA" class="input input-small"></select>
-            </label>
-            <label>
-              second policy selector
-              <select id="policyCompareB" class="input input-small"></select>
-            </label>
-          </div>
-          <div class="toolbar" style="margin-top: 10px;">
-            <button id="comparePoliciesBtn" class="button">Compare Policies</button>
-          </div>
-          <div id="policyDiffBanner" class="banner hidden"></div>
-          <table>
-            <thead>
-              <tr>
-                <th>field name</th>
-                <th>old value</th>
-                <th>new value</th>
-              </tr>
-            </thead>
-            <tbody id="policyDiffBody">
-              <tr><td colspan="3" class="muted">Select two policies and click Compare Policies.</td></tr>
-            </tbody>
-          </table>
+          <details class="json-block">
+            <summary>Policy Diff</summary>
+            <p class="helper">Compare two policy versions and view only changed rules fields.</p>
+            <div class="form-grid">
+              <label>
+                first policy selector
+                <select id="policyCompareA" class="input input-small"></select>
+              </label>
+              <label>
+                second policy selector
+                <select id="policyCompareB" class="input input-small"></select>
+              </label>
+            </div>
+            <div class="toolbar" style="margin-top: 10px;">
+              <button id="comparePoliciesBtn" class="button">Compare Policies</button>
+            </div>
+            <div id="policyDiffBanner" class="banner hidden"></div>
+            <table>
+              <thead>
+                <tr>
+                  <th>field name</th>
+                  <th>old value</th>
+                  <th>new value</th>
+                </tr>
+              </thead>
+              <tbody id="policyDiffBody">
+                <tr><td colspan="3" class="muted">Select two policies and click Compare Policies.</td></tr>
+              </tbody>
+            </table>
+          </details>
         </section>
 
         <section class="card">
@@ -530,6 +550,8 @@ def admin_dashboard_ui() -> HTMLResponse:
           </details>
         </section>
 
+        <h2 class="group-title">Decision Workflow</h2>
+        <p class="group-note">Filter, inspect, replay, and export decision evidence.</p>
         <section class="card">
           <h2>Recent Decisions</h2>
           <p class="helper">Newest decision events first. Use filters for targeted inspection, then View or Replay any row. Detail and replay panels below track the selected decision.</p>
@@ -643,7 +665,7 @@ def admin_dashboard_ui() -> HTMLResponse:
             <button id="downloadExportBtn" class="button">Download JSON</button>
           </div>
           <div id="exportBanner" class="banner hidden"></div>
-          <details class="json-block" open>
+          <details class="json-block">
             <summary>Export Preview</summary>
             <pre id="exportResult">No export run yet.</pre>
           </details>
@@ -686,6 +708,17 @@ def admin_dashboard_ui() -> HTMLResponse:
       const detailBanner = document.getElementById("detailBanner");
       const replayBanner = document.getElementById("replayBanner");
       const simActionType = document.getElementById("simActionType");
+      const policyNameInput = document.getElementById("policyName");
+      const policyVersionInput = document.getElementById("policyVersion");
+      const simUserIdInput = document.getElementById("simUserId");
+      const simRefundAmountInput = document.getElementById("simRefundAmount");
+      const simCreditAmountInput = document.getElementById("simCreditAmount");
+      const simCurrencyInput = document.getElementById("simCurrency");
+      const activatePolicyIdInput = document.getElementById("activatePolicyId");
+      const killEnabledInput = document.getElementById("killEnabled");
+      const observeOnlyInput = document.getElementById("observeOnly");
+      const reasonInput = document.getElementById("reason");
+      const updatedByInput = document.getElementById("updatedBy");
       let createdPolicyId = null;
       let latestExportData = null;
       let allPolicies = [];
@@ -694,6 +727,8 @@ def admin_dashboard_ui() -> HTMLResponse:
       let recentDecisionsHasMore = true;
       let currentDecisionFilters = { action_type: "", decision: "", request_id: "" };
       let selectedDecisionEventId = null;
+      let isRefreshingDashboard = false;
+      let loadedRuntimeControls = null;
 
       function showBanner(node, message, ok) {
         node.textContent = message;
@@ -711,6 +746,79 @@ def admin_dashboard_ui() -> HTMLResponse:
         const key = apiKeyInput.value.trim();
         if (!key) return { "Content-Type": "application/json" };
         return { "Content-Type": "application/json", "X-API-Key": key };
+      }
+
+      function hasApiKey() {
+        return !!apiKeyInput.value.trim();
+      }
+
+      function hasSimulationRequiredInputs() {
+        const userId = simUserIdInput.value.trim();
+        const currency = simCurrencyInput.value.trim();
+        if (!userId || currency.length !== 3) {
+          return false;
+        }
+        const amount = simActionType.value === "refund"
+          ? parseOptionalInt("simRefundAmount")
+          : parseOptionalInt("simCreditAmount");
+        return amount !== null && amount > 0;
+      }
+
+      function hasPolicyEditorRequiredInputs() {
+        const name = policyNameInput.value.trim();
+        const version = parseOptionalInt("policyVersion");
+        return !!name && version !== null && version > 0;
+      }
+
+      function normalizeControlValue(value, fallback) {
+        const normalized = (value || "").trim();
+        return normalized || fallback;
+      }
+
+      function hasRuntimeControlChanges() {
+        if (!loadedRuntimeControls) {
+          return false;
+        }
+        const current = {
+          enabled: killEnabledInput.checked,
+          observe_only: observeOnlyInput.checked,
+          reason: normalizeControlValue(reasonInput.value, "updated from /admin UI"),
+          updated_by: normalizeControlValue(updatedByInput.value, "operator-ui"),
+        };
+        return JSON.stringify(current) !== JSON.stringify(loadedRuntimeControls);
+      }
+
+      function updateActionButtonStates() {
+        const hasKey = hasApiKey();
+        const hasPolicyIdForActivation = !!(activatePolicyIdInput.value.trim() || createdPolicyId);
+        refreshBtn.disabled = !hasKey || isRefreshingDashboard;
+        applyControlsBtn.disabled = !hasKey || !loadedRuntimeControls || !hasRuntimeControlChanges();
+        seedDemoBtn.disabled = !hasKey;
+        generateDemoBtn.disabled = !hasKey;
+        resetDemoBtn.disabled = !hasKey;
+        runSimulationBtn.disabled = !hasKey || !hasSimulationRequiredInputs();
+        validatePolicyBtn.disabled = !hasKey || !hasPolicyEditorRequiredInputs();
+        createPolicyBtn.disabled = !hasKey || !hasPolicyEditorRequiredInputs();
+        activatePolicyBtn.disabled = !hasKey || !hasPolicyIdForActivation;
+        comparePoliciesBtn.disabled = !hasKey || allPolicies.length < 2;
+        applyFiltersBtn.disabled = !hasKey;
+        clearFiltersBtn.disabled = !hasKey;
+        exportDecisionsBtn.disabled = !hasKey;
+        downloadExportBtn.disabled = !latestExportData || latestExportData.length === 0;
+        loadMoreDecisionsBtn.disabled = !hasKey || !recentDecisionsHasMore;
+      }
+
+      async function runWithButtonBusy(button, loadingText, action) {
+        const defaultText = button.textContent;
+        button.disabled = true;
+        button.textContent = loadingText;
+        try {
+          await action();
+        } finally {
+          button.disabled = false;
+          button.textContent = defaultText;
+          updateActionButtonStates();
+        }
       }
 
       function formatJson(value) {
@@ -837,6 +945,16 @@ def admin_dashboard_ui() -> HTMLResponse:
 
         document.getElementById("runtimeText").textContent =
           `Reason: ${runtime.reason || "n/a"} | Updated by: ${runtime.updated_by || "n/a"} | Updated at: ${runtime.updated_at || "n/a"}`;
+
+        loadedRuntimeControls = {
+          enabled: !!runtime.kill_switch_enabled,
+          observe_only: !!runtime.observe_only,
+          reason: normalizeControlValue(runtime.reason, "updated from /admin UI"),
+          updated_by: normalizeControlValue(runtime.updated_by, "operator-ui"),
+        };
+        reasonInput.value = loadedRuntimeControls.reason;
+        updatedByInput.value = loadedRuntimeControls.updated_by;
+        updateActionButtonStates();
       }
 
       function renderActivePolicy(policy) {
@@ -904,13 +1022,19 @@ def admin_dashboard_ui() -> HTMLResponse:
           if (item.event_id === selectedDecisionEventId) {
             tr.classList.add("row-selected");
           }
-          tr.querySelector('[data-action="view"]').addEventListener("click", () => {
+          tr.querySelector('[data-action="view"]').addEventListener("click", async (event) => {
+            const button = event.currentTarget;
             markSelectedDecisionRow(item.event_id);
-            loadDecisionDetail(item.event_id);
+            await runWithButtonBusy(button, "Loading...", async () => {
+              await loadDecisionDetail(item.event_id);
+            });
           });
-          tr.querySelector('[data-action="replay"]').addEventListener("click", () => {
+          tr.querySelector('[data-action="replay"]').addEventListener("click", async (event) => {
+            const button = event.currentTarget;
             markSelectedDecisionRow(item.event_id);
-            replayDecision(item.event_id);
+            await runWithButtonBusy(button, "Replaying...", async () => {
+              await replayDecision(item.event_id);
+            });
           });
           tbody.appendChild(tr);
         }
@@ -930,7 +1054,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       }
 
       function updateLoadMoreButton() {
-        loadMoreDecisionsBtn.disabled = !recentDecisionsHasMore;
+        loadMoreDecisionsBtn.disabled = !hasApiKey() || !recentDecisionsHasMore;
         loadMoreDecisionsBtn.style.display = recentDecisionsHasMore ? "inline-block" : "none";
       }
 
@@ -1022,6 +1146,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           showBanner(exportBanner, message, false);
           latestExportData = null;
           document.getElementById("exportResult").textContent = "Export failed.";
+          updateActionButtonStates();
           return;
         }
 
@@ -1029,11 +1154,13 @@ def admin_dashboard_ui() -> HTMLResponse:
         if (!latestExportData.length) {
           showBanner(exportBanner, "Export completed with no matching results.", true);
           document.getElementById("exportResult").textContent = "No decision events found for the selected filters.";
+          updateActionButtonStates();
           return;
         }
 
         showBanner(exportBanner, `Exported ${latestExportData.length} decision event(s).`, true);
         document.getElementById("exportResult").textContent = formatJson(latestExportData);
+        updateActionButtonStates();
       }
 
       function downloadExportJson() {
@@ -1052,6 +1179,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(link.href);
+        updateActionButtonStates();
       }
 
       function toggleSimulationFields() {
@@ -1271,10 +1399,14 @@ def admin_dashboard_ui() -> HTMLResponse:
 
         for (const policy of policies) {
           const tr = document.createElement("tr");
-          if (policy.status === "ACTIVE" || policy.is_active) {
+          const isActive = policy.status === "ACTIVE" || policy.is_active;
+          if (isActive) {
             tr.className = "row-active";
           }
           const policyId = policy.policy_id || policy.id;
+          const activateButton = isActive
+            ? '<button class="button" data-action="activate" disabled>Active</button>'
+            : '<button class="button" data-action="activate">Activate</button>';
           tr.innerHTML = `
             <td>${policyId}</td>
             <td>${policy.name}</td>
@@ -1282,14 +1414,20 @@ def admin_dashboard_ui() -> HTMLResponse:
             <td>${policy.policy_type || "refund_credit_v1"}</td>
             <td>${policy.status}</td>
             <td>${policy.created_at || "-"}</td>
-            <td><button class="button" data-action="view-rules">View Rules</button> <button class="button" data-action="activate">Activate</button></td>
+            <td><button class="button" data-action="view-rules">View Rules</button> ${activateButton}</td>
           `;
           tr.querySelector('[data-action="view-rules"]').addEventListener("click", () => {
             document.getElementById("policyRulesViewer").textContent = formatJson(policy.rules_json || {});
           });
-          tr.querySelector('[data-action="activate"]').addEventListener("click", async () => {
-            await activatePolicyById(String(policyId), true);
-          });
+          const activateButtonNode = tr.querySelector('[data-action="activate"]');
+          if (!activateButtonNode.disabled) {
+            activateButtonNode.addEventListener("click", async (event) => {
+              const button = event.currentTarget;
+              await runWithButtonBusy(button, "Activating...", async () => {
+                await activatePolicyById(String(policyId), true);
+              });
+            });
+          }
           tbody.appendChild(tr);
         }
       }
@@ -1363,6 +1501,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           document.getElementById("policiesTableBody").innerHTML = '<tr><td colspan="7" class="muted">Failed to load policies.</td></tr>';
           allPolicies = [];
           populatePolicyCompareSelectors([]);
+          updateActionButtonStates();
           return;
         }
 
@@ -1370,6 +1509,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         renderPoliciesTable(allPolicies);
         populatePolicyCompareSelectors(allPolicies);
         showBanner(policiesBanner, "Policies loaded.", true);
+        updateActionButtonStates();
       }
 
       async function validatePolicy() {
@@ -1460,6 +1600,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           `Policy created successfully. policy_id=${createdPolicyId} policy_type=${data.policy_type || payload.policy_type}`,
           true
         );
+        updateActionButtonStates();
       }
 
       async function activatePolicyById(policyId, fromRow = false) {
@@ -1506,7 +1647,12 @@ def admin_dashboard_ui() -> HTMLResponse:
 
       function setLoadingState() {
         selectedDecisionEventId = null;
+        loadedRuntimeControls = null;
         updateSelectedDecisionIds(null);
+        document.getElementById("decisionDetailResult").textContent = "No decision selected yet.";
+        document.getElementById("decisionReplayResult").textContent = "No replay run yet.";
+        hideBanner(detailBanner);
+        hideBanner(replayBanner);
         document.getElementById("runtimeText").textContent = "Loading runtime controls...";
         document.getElementById("activePolicyState").textContent = "Loading policy...";
         document.getElementById("activePolicyRules").textContent = "{}";
@@ -1587,60 +1733,74 @@ def admin_dashboard_ui() -> HTMLResponse:
       }
 
       async function refreshDashboard() {
-        await refreshSystemStatus();
-        hideBanner(controlBanner);
-        hideBanner(loadBanner);
-        hideBanner(policiesBanner);
-        hideBanner(policyDiffBanner);
-        hideBanner(decisionFiltersBanner);
-        const key = apiKeyInput.value.trim();
-        if (!key) {
-          showBanner(loadBanner, "API key is required to load dashboard data.", false);
-          return;
+        isRefreshingDashboard = true;
+        updateActionButtonStates();
+        try {
+          await refreshSystemStatus();
+          hideBanner(controlBanner);
+          hideBanner(loadBanner);
+          hideBanner(policiesBanner);
+          hideBanner(policyDiffBanner);
+          hideBanner(decisionFiltersBanner);
+          const key = apiKeyInput.value.trim();
+          if (!key) {
+            showBanner(loadBanner, "API key is required to load dashboard data.", false);
+            return;
+          }
+
+          localStorage.setItem(API_KEY_STORAGE_KEY, key);
+          setLoadingState();
+          const response = await fetch("/v1/admin/dashboard", { headers: getHeaders() });
+          const data = await response.json();
+          if (!response.ok) {
+            const message = response.status === 401
+              ? "Invalid API key. Update the key and refresh."
+              : `Failed to load dashboard: ${JSON.stringify(data)}`;
+            showBanner(loadBanner, message, false);
+            return;
+          }
+          showBanner(loadBanner, "Dashboard data loaded.", true);
+          lastRefreshed.textContent = `Last refreshed: ${new Date().toLocaleString()}`;
+
+          renderRuntimeControls(data.runtime_controls);
+          renderActivePolicy(data.active_policy);
+          await loadPolicies();
+          renderMetricGrid("decisionMetricsGrid", [
+            ["total_decisions", data.decision_metrics.total_decisions],
+            ["allow_count", data.decision_metrics.allow_count],
+            ["escalate_count", data.decision_metrics.escalate_count],
+            ["block_count", data.decision_metrics.block_count],
+            ["observe_only_count", data.decision_metrics.observe_only_count],
+            ["would_block_count", data.decision_metrics.would_block_count],
+            ["would_escalate_count", data.decision_metrics.would_escalate_count]
+          ]);
+          renderMetricGrid("exposureMetricsGrid", [
+            ["date_bucket_utc", data.exposure_metrics.date_bucket_utc],
+            ["refund_daily_total_amount_cents", data.exposure_metrics.refund_daily_total_amount_cents],
+            ["credit_daily_total_amount_cents", data.exposure_metrics.credit_daily_total_amount_cents],
+            ["financial_total_amount_cents", data.exposure_metrics.financial_total_amount_cents]
+          ]);
+          document.getElementById("byActionType").textContent = formatJson(data.decision_metrics.counts_by_action_type || {});
+          document.getElementById("byReasonCode").textContent = formatJson(data.decision_metrics.counts_by_reason_code || {});
+          resetRecentDecisionsPagination(getDecisionFilterValues());
+          await loadRecentDecisions(currentDecisionFilters);
+
+          document.getElementById("killEnabled").checked = !!data.runtime_controls.kill_switch_enabled;
+          document.getElementById("observeOnly").checked = !!data.runtime_controls.observe_only;
+        } finally {
+          isRefreshingDashboard = false;
+          updateActionButtonStates();
         }
-
-        localStorage.setItem(API_KEY_STORAGE_KEY, key);
-        setLoadingState();
-        const response = await fetch("/v1/admin/dashboard", { headers: getHeaders() });
-        const data = await response.json();
-        if (!response.ok) {
-          const message = response.status === 401
-            ? "Invalid API key. Update the key and refresh."
-            : `Failed to load dashboard: ${JSON.stringify(data)}`;
-          showBanner(loadBanner, message, false);
-          return;
-        }
-        showBanner(loadBanner, "Dashboard data loaded.", true);
-        lastRefreshed.textContent = `Last refreshed: ${new Date().toLocaleString()}`;
-
-        renderRuntimeControls(data.runtime_controls);
-        renderActivePolicy(data.active_policy);
-        await loadPolicies();
-        renderMetricGrid("decisionMetricsGrid", [
-          ["total_decisions", data.decision_metrics.total_decisions],
-          ["allow_count", data.decision_metrics.allow_count],
-          ["escalate_count", data.decision_metrics.escalate_count],
-          ["block_count", data.decision_metrics.block_count],
-          ["observe_only_count", data.decision_metrics.observe_only_count],
-          ["would_block_count", data.decision_metrics.would_block_count],
-          ["would_escalate_count", data.decision_metrics.would_escalate_count]
-        ]);
-        renderMetricGrid("exposureMetricsGrid", [
-          ["date_bucket_utc", data.exposure_metrics.date_bucket_utc],
-          ["refund_daily_total_amount_cents", data.exposure_metrics.refund_daily_total_amount_cents],
-          ["credit_daily_total_amount_cents", data.exposure_metrics.credit_daily_total_amount_cents],
-          ["financial_total_amount_cents", data.exposure_metrics.financial_total_amount_cents]
-        ]);
-        document.getElementById("byActionType").textContent = formatJson(data.decision_metrics.counts_by_action_type || {});
-        document.getElementById("byReasonCode").textContent = formatJson(data.decision_metrics.counts_by_reason_code || {});
-        resetRecentDecisionsPagination(getDecisionFilterValues());
-        await loadRecentDecisions(currentDecisionFilters);
-
-        document.getElementById("killEnabled").checked = !!data.runtime_controls.kill_switch_enabled;
-        document.getElementById("observeOnly").checked = !!data.runtime_controls.observe_only;
       }
 
       async function applyControls() {
+        const key = apiKeyInput.value.trim();
+        if (!key) {
+          showBanner(controlBanner, "API key is required to update controls.", false);
+          return;
+        }
+        localStorage.setItem(API_KEY_STORAGE_KEY, key);
+
         const payload = {
           enabled: document.getElementById("killEnabled").checked,
           observe_only: document.getElementById("observeOnly").checked,
@@ -1674,47 +1834,81 @@ def admin_dashboard_ui() -> HTMLResponse:
         }
         localStorage.setItem(API_KEY_STORAGE_KEY, key);
 
-        seedDemoBtn.disabled = true;
-        generateDemoBtn.disabled = true;
-        resetDemoBtn.disabled = true;
         document.getElementById("demoHelpersResult").textContent = `Running ${actionLabel}...`;
-
-        try {
-          const response = await fetch(endpoint, {
-            method: "POST",
-            headers: getHeaders(),
-          });
-          const data = await response.json();
-          if (!response.ok) {
-            const message = response.status === 401
-              ? "Invalid API key. Update the key and retry."
-              : `${actionLabel} failed: ${JSON.stringify(data)}`;
-            showBanner(demoHelpersBanner, message, false);
-            document.getElementById("demoHelpersResult").textContent = `${actionLabel} failed.`;
-            return;
-          }
-
-          document.getElementById("demoHelpersResult").textContent = formatJson(data);
-          showBanner(demoHelpersBanner, `${actionLabel} completed.`, true);
-          await refreshDashboard();
-        } finally {
-          seedDemoBtn.disabled = false;
-          generateDemoBtn.disabled = false;
-          resetDemoBtn.disabled = false;
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: getHeaders(),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          const message = response.status === 401
+            ? "Invalid API key. Update the key and retry."
+            : `${actionLabel} failed: ${JSON.stringify(data)}`;
+          showBanner(demoHelpersBanner, message, false);
+          document.getElementById("demoHelpersResult").textContent = `${actionLabel} failed.`;
+          return;
         }
+
+        document.getElementById("demoHelpersResult").textContent = formatJson(data);
+        showBanner(demoHelpersBanner, `${actionLabel} completed.`, true);
+        await refreshDashboard();
       }
 
-      refreshBtn.addEventListener("click", refreshDashboard);
-      applyControlsBtn.addEventListener("click", applyControls);
-      seedDemoBtn.addEventListener("click", () => runDemoHelper("/v1/admin/demo/bootstrap", "Seed Demo Policy"));
-      generateDemoBtn.addEventListener("click", () => runDemoHelper("/v1/admin/demo/generate", "Generate Demo Events"));
-      resetDemoBtn.addEventListener("click", () => runDemoHelper("/v1/admin/demo/reset", "Reset Demo Data"));
-      runSimulationBtn.addEventListener("click", runSimulation);
-      validatePolicyBtn.addEventListener("click", validatePolicy);
-      createPolicyBtn.addEventListener("click", createPolicy);
-      activatePolicyBtn.addEventListener("click", activatePolicy);
-      comparePoliciesBtn.addEventListener("click", comparePolicies);
-      exportDecisionsBtn.addEventListener("click", exportDecisions);
+      refreshBtn.addEventListener("click", async () => {
+        await runWithButtonBusy(refreshBtn, "Refreshing...", async () => {
+          await refreshDashboard();
+        });
+      });
+      applyControlsBtn.addEventListener("click", async () => {
+        await runWithButtonBusy(applyControlsBtn, "Applying...", async () => {
+          await applyControls();
+        });
+      });
+      seedDemoBtn.addEventListener("click", async () => {
+        await runWithButtonBusy(seedDemoBtn, "Seeding...", async () => {
+          await runDemoHelper("/v1/admin/demo/bootstrap", "Seed Demo Policy");
+        });
+      });
+      generateDemoBtn.addEventListener("click", async () => {
+        await runWithButtonBusy(generateDemoBtn, "Generating...", async () => {
+          await runDemoHelper("/v1/admin/demo/generate", "Generate Demo Events");
+        });
+      });
+      resetDemoBtn.addEventListener("click", async () => {
+        await runWithButtonBusy(resetDemoBtn, "Resetting...", async () => {
+          await runDemoHelper("/v1/admin/demo/reset", "Reset Demo Data");
+        });
+      });
+      runSimulationBtn.addEventListener("click", async () => {
+        await runWithButtonBusy(runSimulationBtn, "Running...", async () => {
+          await runSimulation();
+        });
+      });
+      validatePolicyBtn.addEventListener("click", async () => {
+        await runWithButtonBusy(validatePolicyBtn, "Validating...", async () => {
+          await validatePolicy();
+        });
+      });
+      createPolicyBtn.addEventListener("click", async () => {
+        await runWithButtonBusy(createPolicyBtn, "Creating...", async () => {
+          await createPolicy();
+        });
+      });
+      activatePolicyBtn.addEventListener("click", async () => {
+        await runWithButtonBusy(activatePolicyBtn, "Activating...", async () => {
+          await activatePolicy();
+        });
+      });
+      comparePoliciesBtn.addEventListener("click", async () => {
+        await runWithButtonBusy(comparePoliciesBtn, "Comparing...", async () => {
+          comparePolicies();
+        });
+      });
+      exportDecisionsBtn.addEventListener("click", async () => {
+        await runWithButtonBusy(exportDecisionsBtn, "Exporting...", async () => {
+          await exportDecisions();
+        });
+      });
       downloadExportBtn.addEventListener("click", downloadExportJson);
       applyFiltersBtn.addEventListener("click", async () => {
         const key = apiKeyInput.value.trim();
@@ -1723,9 +1917,11 @@ def admin_dashboard_ui() -> HTMLResponse:
           return;
         }
         localStorage.setItem(API_KEY_STORAGE_KEY, key);
-        resetRecentDecisionsPagination(getDecisionFilterValues());
-        setRecentDecisionsLoading("Loading filtered decisions...");
-        await loadRecentDecisions(currentDecisionFilters);
+        await runWithButtonBusy(applyFiltersBtn, "Applying...", async () => {
+          resetRecentDecisionsPagination(getDecisionFilterValues());
+          setRecentDecisionsLoading("Loading filtered decisions...");
+          await loadRecentDecisions(currentDecisionFilters);
+        });
       });
       clearFiltersBtn.addEventListener("click", async () => {
         document.getElementById("filterActionType").value = "";
@@ -1737,9 +1933,11 @@ def admin_dashboard_ui() -> HTMLResponse:
           return;
         }
         localStorage.setItem(API_KEY_STORAGE_KEY, key);
-        resetRecentDecisionsPagination(getDecisionFilterValues());
-        setRecentDecisionsLoading("Loading recent decisions...");
-        await loadRecentDecisions(currentDecisionFilters);
+        await runWithButtonBusy(clearFiltersBtn, "Clearing...", async () => {
+          resetRecentDecisionsPagination(getDecisionFilterValues());
+          setRecentDecisionsLoading("Loading recent decisions...");
+          await loadRecentDecisions(currentDecisionFilters);
+        });
       });
       loadMoreDecisionsBtn.addEventListener("click", async () => {
         if (!recentDecisionsHasMore) {
@@ -1751,17 +1949,30 @@ def admin_dashboard_ui() -> HTMLResponse:
           return;
         }
         localStorage.setItem(API_KEY_STORAGE_KEY, key);
-        loadMoreDecisionsBtn.disabled = true;
-        loadMoreDecisionsBtn.textContent = "Loading...";
-        try {
+        await runWithButtonBusy(loadMoreDecisionsBtn, "Loading...", async () => {
           await loadRecentDecisions(currentDecisionFilters, true);
-        } finally {
-          loadMoreDecisionsBtn.textContent = "Load More";
-          updateLoadMoreButton();
-        }
+        });
+        loadMoreDecisionsBtn.textContent = "Load More";
+        updateLoadMoreButton();
       });
-      simActionType.addEventListener("change", toggleSimulationFields);
+      simActionType.addEventListener("change", () => {
+        toggleSimulationFields();
+        updateActionButtonStates();
+      });
+      apiKeyInput.addEventListener("input", updateActionButtonStates);
+      killEnabledInput.addEventListener("change", updateActionButtonStates);
+      observeOnlyInput.addEventListener("change", updateActionButtonStates);
+      reasonInput.addEventListener("input", updateActionButtonStates);
+      updatedByInput.addEventListener("input", updateActionButtonStates);
+      policyNameInput.addEventListener("input", updateActionButtonStates);
+      policyVersionInput.addEventListener("input", updateActionButtonStates);
+      activatePolicyIdInput.addEventListener("input", updateActionButtonStates);
+      simUserIdInput.addEventListener("input", updateActionButtonStates);
+      simRefundAmountInput.addEventListener("input", updateActionButtonStates);
+      simCreditAmountInput.addEventListener("input", updateActionButtonStates);
+      simCurrencyInput.addEventListener("input", updateActionButtonStates);
       toggleSimulationFields();
+      updateActionButtonStates();
 
       const savedApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
       if (savedApiKey) {
