@@ -352,6 +352,88 @@ def test_replay_returns_matching_decision_and_does_not_create_new_event(
     db_session.commit()
 
 
+def test_replay_prefers_normalized_input_json_when_present(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    _set_kill_switch(db_session, enabled=False, reason="normal", updated_by="pytest")
+    policy_id = insert_active_policy(db_session, version=62)
+    request_id = f"req-{uuid.uuid4()}"
+
+    create_response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": request_id,
+            "user_id": "user-replay-normalized",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 1000,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+    assert create_response.status_code == 200
+    event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    assert event is not None
+
+    db_session.execute(
+        update(DecisionEvent)
+        .where(DecisionEvent.event_id == event.event_id)
+        .values(action_payload_json={"malformed": True})
+    )
+    db_session.commit()
+
+    replay_response = authorized_client.post(f"/v1/admin/decisions/{event.event_id}/replay")
+    assert replay_response.status_code == 200
+    assert replay_response.json()["matches_original"] is True
+    assert replay_response.json()["replayed_decision"] == event.decision
+
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_replay_falls_back_to_action_payload_when_normalized_input_missing(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    _set_kill_switch(db_session, enabled=False, reason="normal", updated_by="pytest")
+    policy_id = insert_active_policy(db_session, version=63)
+    request_id = f"req-{uuid.uuid4()}"
+
+    create_response = authorized_client.post(
+        "/v1/actions/refund",
+        json={
+            "request_id": request_id,
+            "user_id": "user-replay-payload-fallback",
+            "ticket_id": "ticket-1",
+            "refund_amount_cents": 1000,
+            "currency": "USD",
+            "model_version": "gpt-test",
+            "metadata": {},
+        },
+    )
+    assert create_response.status_code == 200
+    event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    assert event is not None
+
+    db_session.execute(
+        update(DecisionEvent)
+        .where(DecisionEvent.event_id == event.event_id)
+        .values(normalized_input_json=None)
+    )
+    db_session.commit()
+
+    replay_response = authorized_client.post(f"/v1/admin/decisions/{event.event_id}/replay")
+    assert replay_response.status_code == 200
+    assert replay_response.json()["matches_original"] is True
+    assert replay_response.json()["replayed_decision"] == event.decision
+
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
 def test_replay_uses_evaluator_registry(
     authorized_client: TestClient,
     db_session: Session,

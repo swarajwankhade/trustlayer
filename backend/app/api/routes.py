@@ -41,6 +41,7 @@ from app.config import get_settings
 from app.db.session import get_db_session, get_engine
 from app.devtools.service import bootstrap_demo_data, generate_demo_decisions, reset_dev_data
 from app.evaluators import get_evaluator
+from app.evaluators.refund_credit_v1.normalizer import NormalizedAction as RefundCreditV1NormalizedAction
 from app.evaluators.refund_credit_v1 import RefundCreditV1Exposure
 from app.exposure.store import ExposureStore, get_exposure_store
 from app.models import DecisionEvent, Policy
@@ -2042,19 +2043,22 @@ def replay_decision(event_id: UUID, db: Session = Depends(get_db_session)) -> De
             detail="Stored policy version referenced by decision was not found",
         )
 
-    if event.action_payload_json is None:
+    if event.normalized_input_json is None and event.action_payload_json is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Stored action payload is missing for replay",
+            detail="Stored action evidence is missing for replay",
         )
 
     resolved_policy_type = event.policy_type or policy.policy_type or DEFAULT_POLICY_TYPE
     evaluator = get_evaluator(resolved_policy_type)
     try:
-        normalized_action = evaluator.normalize_action(
-            action_type=event.action_type,
-            payload=event.action_payload_json,
+        normalized_action = _resolve_replay_normalized_action(
+            event=event,
+            evaluator=evaluator,
+            policy_type=resolved_policy_type,
         )
+    except HTTPException:
+        raise
     except (ValidationError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -2312,6 +2316,36 @@ def _deserialize_exposure_context(exposure_snapshot: dict[str, Any]) -> Exposure
         per_user_daily_amount=cents_to_decimal(typed.per_user_daily_amount_cents),
         financial_total_amount_cents=typed.financial_total_amount_cents,
     )
+
+
+def _resolve_replay_normalized_action(
+    *,
+    event: DecisionEvent,
+    evaluator: Any,
+    policy_type: str,
+) -> Any:
+    if event.normalized_input_json is not None:
+        return _deserialize_normalized_action(
+            policy_type=policy_type,
+            normalized_input_json=event.normalized_input_json,
+        )
+
+    if event.action_payload_json is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Stored action payload is missing for replay",
+        )
+    return evaluator.normalize_action(action_type=event.action_type, payload=event.action_payload_json)
+
+
+def _deserialize_normalized_action(
+    *,
+    policy_type: str,
+    normalized_input_json: dict[str, Any],
+) -> Any:
+    if policy_type == DEFAULT_POLICY_TYPE:
+        return RefundCreditV1NormalizedAction.model_validate(normalized_input_json)
+    raise ValueError(f"Unsupported policy_type for normalized replay input: {policy_type}")
 
 
 def _postgres_ready() -> bool:

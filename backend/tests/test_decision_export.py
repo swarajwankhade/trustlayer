@@ -66,6 +66,8 @@ def _insert_event(
     reason_codes: list[str],
     would_decision: str | None = None,
     would_reason_codes: list[str] | None = None,
+    event_schema_version: str | None = None,
+    normalized_input_json: dict[str, object] | None = None,
 ) -> str:
     request_id = f"export-{uuid.uuid4()}"
     db_session.add(
@@ -78,6 +80,7 @@ def _insert_event(
             would_decision=would_decision,
             would_reason_codes=would_reason_codes,
             model_version="export-test",
+            event_schema_version=event_schema_version,
             policy_id=None,
             policy_version=None,
             exposure_snapshot_json={
@@ -91,6 +94,7 @@ def _insert_event(
                 "ticket_id": "export-ticket",
                 "currency": "USD",
             },
+            normalized_input_json=normalized_input_json,
         )
     )
     db_session.commit()
@@ -117,6 +121,17 @@ def test_export_returns_inserted_events_and_would_fields(
         reason_codes=["OBSERVE_ONLY", "WOULD_BLOCK"],
         would_decision="BLOCK",
         would_reason_codes=["PER_ACTION_MAX_AMOUNT_EXCEEDED"],
+        event_schema_version="1",
+        normalized_input_json={
+            "action_type": "refund",
+            "user_id": "export-user",
+            "amount_cents": 1000,
+            "currency": "USD",
+            "ticket_id": "export-ticket",
+            "model_version": "export-test",
+            "metadata": {},
+            "credit_type": None,
+        },
     )
 
     response = authorized_client.get("/v1/admin/decisions/export")
@@ -130,6 +145,9 @@ def test_export_returns_inserted_events_and_would_fields(
     assert body[0]["would_reason_codes"] == ["PER_ACTION_MAX_AMOUNT_EXCEEDED"]
     assert "policy_type" in body[0]
     assert "runtime_mode" in body[0]
+    assert body[0]["event_schema_version"] == "1"
+    assert body[0]["normalized_input_json"] is not None
+    assert body[0]["normalized_input_json"]["action_type"] == "refund"
 
 
 def test_export_filters_by_action_type(authorized_client: TestClient, db_session: Session) -> None:
