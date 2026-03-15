@@ -31,6 +31,29 @@ Responsibilities:
 
 ---
 
+# 1.1 Current Wedge and Long-Term Direction
+
+Today, TrustLayer’s production wedge is financial action governance for:
+
+• `refund`  
+• `credit_adjustment`
+
+The internal design is intentionally broader than this first wedge:
+
+• evaluator resolution is keyed by `policy_type`  
+• each evaluator can define its own rule schema, normalizer, and evaluation logic  
+• the runtime pipeline (auth, idempotency, policy lookup, evaluation, evidence write) is reusable across action families
+
+This allows TrustLayer to extend from refund/credit controls into governance for additional AI-initiated actions without replacing core orchestration.
+
+Long-term, the target architecture remains:
+
+AI Systems → TrustLayer → Execution Systems
+
+In that model, TrustLayer functions as a verification/governance layer, and `decision_events` serve as replayable evidence records for audit, incident analysis, and policy attribution.
+
+---
+
 # 2. Core Components (MVP)
 
 The MVP architecture consists of the following components.

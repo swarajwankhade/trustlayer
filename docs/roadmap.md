@@ -133,6 +133,21 @@ Registry-first expansion keeps policy evolution incremental and testable without
 
 ---
 
+# Expansion Trajectory: Wedge to Verification Layer
+
+Practical product direction:
+
+1. Refund/Credit Governance (current wedge)
+• prove deterministic control for high-impact financial actions.
+
+2. Broader AI Action Governance
+• add additional action families through new `policy_type` evaluators while reusing shared control-plane orchestration.
+
+3. Verification Layer for AI-Initiated Actions
+• position TrustLayer as the standard verification checkpoint between AI intent and execution systems, supported by replayable evidence events.
+
+---
+
 # Strategic Principle
 
 TrustLayer wins when organizations adopt the architecture:

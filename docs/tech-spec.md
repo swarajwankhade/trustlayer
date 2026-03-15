@@ -211,6 +211,20 @@ Different policy types can define different `rules_json` schemas. The schema is 
 
 ---
 
+# 10.1 Strategic Expansion Direction
+
+`refund_credit_v1` is the first evaluator family and defines the current MVP wedge.
+
+The architecture is intentionally modular:
+
+• `policy_type` selects evaluator behavior  
+• evaluators own typed rule validation and action normalization  
+• shared orchestration (idempotency, exposure, decision logging, replay) stays consistent
+
+Over time, additional `policy_type` families may govern other AI-initiated actions beyond refunds and credits while preserving the same core control-plane guarantees.
+
+---
+
 # 11. Policy Rules (refund_credit_v1)
 
 Policy rules stored as JSON.

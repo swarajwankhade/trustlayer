@@ -11,6 +11,12 @@ Decisions are deterministic and returned as:
 - `ESCALATE`
 - `BLOCK`
 
+## Product Direction
+
+Current wedge: TrustLayer governs AI-initiated refunds and credits.
+
+Long-term direction: the same control-plane architecture is intended to govern broader AI-initiated actions by acting as a verification and governance layer between AI systems and execution systems.
+
 ## MVP Capabilities
 
 - Refund + credit governance with shared authorization pipeline
