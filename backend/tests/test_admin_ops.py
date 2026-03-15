@@ -231,6 +231,7 @@ def test_get_decisions_returns_and_filters(authorized_client: TestClient, db_ses
     assert by_request_response.json()[0]["request_id"] == request_id
     assert by_request_response.json()[0]["event_schema_version"] == "1"
     assert by_request_response.json()[0]["normalized_input_json"] is not None
+    assert by_request_response.json()[0]["normalized_input_hash"] is not None
 
     assert by_decision_response.status_code == 200
     assert all(event["decision"] == "ALLOW" for event in by_decision_response.json())
@@ -307,6 +308,7 @@ def test_get_decision_detail_returns_expected_event(authorized_client: TestClien
     assert detail_response.json()["normalized_input_json"] is not None
     assert detail_response.json()["normalized_input_json"]["action_type"] == "refund"
     assert detail_response.json()["normalized_input_json"]["amount_cents"] == 1000
+    assert detail_response.json()["normalized_input_hash"] is not None
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))

@@ -121,6 +121,8 @@ def test_first_refund_call_persists_one_decision_event(
     assert events[0].normalized_input_json["action_type"] == "refund"
     assert events[0].normalized_input_json["amount_cents"] == 1000
     assert events[0].normalized_input_json["user_id"] == "user-1"
+    assert events[0].normalized_input_hash is not None
+    assert len(events[0].normalized_input_hash) == 64
     assert events[0].exposure_snapshot_json == {
         "daily_total_amount": "0.00",
         "per_user_daily_count": 0,
@@ -167,6 +169,41 @@ def test_live_refund_path_uses_evaluator_registry(
     assert requested_policy_types == ["refund_credit_v1"]
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
+    db_session.execute(delete(Policy).where(Policy.id == policy_id))
+    db_session.commit()
+
+
+def test_normalized_input_hash_is_stable_for_equivalent_refund_inputs(
+    authorized_client: TestClient,
+    db_session: Session,
+) -> None:
+    first_request_id = f"req-{uuid.uuid4()}"
+    second_request_id = f"req-{uuid.uuid4()}"
+    policy_id = insert_active_policy(db_session, version=23)
+
+    payload = {
+        "user_id": "user-hash-stability",
+        "ticket_id": "ticket-1",
+        "refund_amount_cents": 1000,
+        "currency": "USD",
+        "model_version": "gpt-test",
+        "metadata": {},
+    }
+
+    first_response = authorized_client.post("/v1/actions/refund", json={"request_id": first_request_id, **payload})
+    second_response = authorized_client.post("/v1/actions/refund", json={"request_id": second_request_id, **payload})
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+
+    first_event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == first_request_id))
+    second_event = db_session.scalar(select(DecisionEvent).where(DecisionEvent.request_id == second_request_id))
+    assert first_event is not None
+    assert second_event is not None
+    assert first_event.normalized_input_json == second_event.normalized_input_json
+    assert first_event.normalized_input_hash == second_event.normalized_input_hash
+    assert first_event.normalized_input_hash is not None
+
+    db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id.in_([first_request_id, second_request_id])))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))
     db_session.commit()
 

@@ -68,6 +68,7 @@ def _insert_event(
     would_reason_codes: list[str] | None = None,
     event_schema_version: str | None = None,
     normalized_input_json: dict[str, object] | None = None,
+    normalized_input_hash: str | None = None,
 ) -> str:
     request_id = f"export-{uuid.uuid4()}"
     db_session.add(
@@ -95,6 +96,7 @@ def _insert_event(
                 "currency": "USD",
             },
             normalized_input_json=normalized_input_json,
+            normalized_input_hash=normalized_input_hash,
         )
     )
     db_session.commit()
@@ -132,6 +134,7 @@ def test_export_returns_inserted_events_and_would_fields(
             "metadata": {},
             "credit_type": None,
         },
+        normalized_input_hash="f" * 64,
     )
 
     response = authorized_client.get("/v1/admin/decisions/export")
@@ -148,6 +151,7 @@ def test_export_returns_inserted_events_and_would_fields(
     assert body[0]["event_schema_version"] == "1"
     assert body[0]["normalized_input_json"] is not None
     assert body[0]["normalized_input_json"]["action_type"] == "refund"
+    assert body[0]["normalized_input_hash"] == "f" * 64
 
 
 def test_export_filters_by_action_type(authorized_client: TestClient, db_session: Session) -> None:

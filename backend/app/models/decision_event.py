@@ -28,7 +28,7 @@ class DecisionEvent(Base):
     model_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
     policy_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     runtime_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    event_schema_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    event_schema_version: Mapped[str] = mapped_column(String(32), nullable=False, server_default="1")
     policy_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("policies.id", ondelete="SET NULL"),
@@ -38,3 +38,4 @@ class DecisionEvent(Base):
     exposure_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     action_payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     normalized_input_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    normalized_input_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)

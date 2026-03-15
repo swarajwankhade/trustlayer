@@ -94,6 +94,8 @@ def test_credit_first_request_persists_one_decision_event(
     assert events[0].normalized_input_json["action_type"] == "credit_adjustment"
     assert events[0].normalized_input_json["amount_cents"] == 1500
     assert events[0].normalized_input_json["user_id"] == "user-1"
+    assert events[0].normalized_input_hash is not None
+    assert len(events[0].normalized_input_hash) == 64
 
     db_session.execute(delete(DecisionEvent).where(DecisionEvent.request_id == request_id))
     db_session.execute(delete(Policy).where(Policy.id == policy_id))

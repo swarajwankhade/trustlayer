@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+import hashlib
+import json
 from typing import Any
 
 from sqlalchemy import select
@@ -33,9 +35,18 @@ def authorize_action(
     exposure_store: ExposureStore,
 ) -> DecisionEvent:
     normalized_input_json: dict[str, Any] | None = None
+    normalized_input_hash: str | None = None
     existing_event = db.scalar(select(DecisionEvent).where(DecisionEvent.request_id == action.request_id))
     if existing_event is not None:
         return existing_event
+
+    default_evaluator = get_evaluator(DEFAULT_POLICY_TYPE)
+    default_normalized_action = default_evaluator.normalize_action(
+        action_type=action.action_type,
+        payload=action.payload_json,
+    )
+    normalized_input_json = default_normalized_action.model_dump(mode="json")
+    normalized_input_hash = _stable_json_sha256(normalized_input_json)
 
     kill_switch = get_or_init_kill_switch(db)
     if kill_switch.enabled:
@@ -55,6 +66,7 @@ def authorize_action(
             exposure_snapshot_json=ExposureContext().model_dump(mode="json"),
             action_payload_json=action.payload_json,
             normalized_input_json=normalized_input_json,
+            normalized_input_hash=normalized_input_hash,
         )
         db.add(decision_event)
         db.commit()
@@ -63,9 +75,14 @@ def authorize_action(
 
     active_policy = load_active_policy(db)
     resolved_policy_type = active_policy.policy_type or DEFAULT_POLICY_TYPE
-    evaluator = get_evaluator(resolved_policy_type)
-    normalized_action = evaluator.normalize_action(action_type=action.action_type, payload=action.payload_json)
-    normalized_input_json = normalized_action.model_dump(mode="json")
+    if resolved_policy_type == DEFAULT_POLICY_TYPE:
+        evaluator = default_evaluator
+        normalized_action = default_normalized_action
+    else:
+        evaluator = get_evaluator(resolved_policy_type)
+        normalized_action = evaluator.normalize_action(action_type=action.action_type, payload=action.payload_json)
+        normalized_input_json = normalized_action.model_dump(mode="json")
+        normalized_input_hash = _stable_json_sha256(normalized_input_json)
     decision_ts = datetime.now(timezone.utc)
     decision_date = decision_ts.date()
     minute_bucket = decision_ts.strftime("%Y-%m-%dT%H:%M")
@@ -93,6 +110,7 @@ def authorize_action(
                 exposure_snapshot_json=ExposureContext().model_dump(mode="json"),
                 action_payload_json=action.payload_json,
                 normalized_input_json=normalized_input_json,
+                normalized_input_hash=normalized_input_hash,
             )
             db.add(decision_event)
             db.commit()
@@ -163,6 +181,7 @@ def authorize_action(
         exposure_snapshot_json=exposure_context.model_dump(mode="json"),
         action_payload_json=action.payload_json,
         normalized_input_json=normalized_input_json,
+        normalized_input_hash=normalized_input_hash,
     )
     db.add(decision_event)
     db.commit()
@@ -188,3 +207,8 @@ def get_or_init_kill_switch(db: Session) -> KillSwitch:
 
 def _to_cents(amount: Decimal) -> int:
     return int((amount * Decimal("100")).quantize(Decimal("1")))
+
+
+def _stable_json_sha256(payload: dict[str, Any]) -> str:
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
