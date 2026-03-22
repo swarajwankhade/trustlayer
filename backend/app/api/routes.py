@@ -230,14 +230,32 @@ def admin_dashboard_ui() -> HTMLResponse:
       .row-active { background: #eef8f1; }
       .row-selected { background: #edf4ff; }
       .reason-tags { display: flex; flex-wrap: wrap; gap: 6px; }
-      .id-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
-      .id-pill {
+      .id-copy-list {
+        display: grid;
+        gap: 8px;
+        margin: 8px 0;
+      }
+      .id-copy-row {
+        display: grid;
+        grid-template-columns: 92px minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+      }
+      .id-key {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .id-value {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 12px;
         background: #f3f6fa;
         border: 1px solid var(--border);
         border-radius: 6px;
         padding: 4px 8px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .helper {
         margin: 0 0 10px;
@@ -484,6 +502,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         <section class="card">
           <h2>Simulation</h2>
           <p class="section-note">Dry-run evaluator call via <code>POST /v1/admin/simulate</code>. No decision event write and no Redis exposure mutation.</p>
+          <p class="helper">Amount input is action-specific: refund uses <code>refund_amount_cents</code>, credit uses <code>credit_amount_cents</code>.</p>
           <div class="form-grid">
             <label>
               Action Type
@@ -522,6 +541,7 @@ def admin_dashboard_ui() -> HTMLResponse:
             </label>
           </div>
           <h3>Exposure Overrides (optional)</h3>
+          <p class="helper">Action-type exposure fields (<code>daily_total_amount_cents</code>, <code>per_user_daily_amount_cents</code>, <code>per_user_daily_count</code>) are distinct from combined exposure (<code>financial_total_amount_cents</code>).</p>
           <div class="form-grid">
             <label>
               financial_total_amount_cents
@@ -604,8 +624,8 @@ def admin_dashboard_ui() -> HTMLResponse:
           <div class="grid" style="margin-top: 12px;">
             <div class="card" style="padding: 12px;">
               <h3>Decision Detail</h3>
-              <p class="helper">Stored event payload and exposure snapshot for the selected row.</p>
-              <div id="selectedDecisionIds" class="id-line">
+              <p class="helper">Stored event payload and exposure snapshot for the selected row. Exposure fields are grouped as action-type daily usage vs combined financial usage.</p>
+              <div id="selectedDecisionIds" class="id-copy-list">
                 <span class="muted">No decision selected yet.</span>
               </div>
               <div id="detailBanner" class="banner hidden"></div>
@@ -616,7 +636,7 @@ def admin_dashboard_ui() -> HTMLResponse:
             </div>
             <div class="card" style="padding: 12px;">
               <h3>Replay Result</h3>
-              <p class="helper">Replay recomputes a historical decision using stored policy version and exposure snapshot.</p>
+              <p class="helper">Replay recomputes a historical decision using stored policy version and stored exposure snapshot (including action-type daily exposure and combined financial exposure).</p>
               <div id="replayBanner" class="banner hidden"></div>
               <details class="json-block" open>
                 <summary>Replay Result JSON</summary>
@@ -629,6 +649,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         <section class="card">
           <h2>Export Decisions</h2>
           <p class="helper">Run filtered exports for offline audit/debug. JSON download uses the latest successful export result.</p>
+          <p class="helper">Preview uses the same evidence pattern as Decision Detail: readable exposure summary first, raw evidence JSON preserved below.</p>
           <div class="form-grid">
             <label>
               action_type
@@ -665,8 +686,12 @@ def admin_dashboard_ui() -> HTMLResponse:
             <button id="downloadExportBtn" class="button">Download JSON</button>
           </div>
           <div id="exportBanner" class="banner hidden"></div>
+          <details class="json-block" open>
+            <summary>Exposure Summary Preview</summary>
+            <pre id="exportExposureSummary">No export run yet.</pre>
+          </details>
           <details class="json-block">
-            <summary>Export Preview</summary>
+            <summary>Export Preview (Raw JSON)</summary>
             <pre id="exportResult">No export run yet.</pre>
           </details>
         </section>
@@ -705,6 +730,7 @@ def admin_dashboard_ui() -> HTMLResponse:
       const policyDiffBanner = document.getElementById("policyDiffBanner");
       const decisionFiltersBanner = document.getElementById("decisionFiltersBanner");
       const exportBanner = document.getElementById("exportBanner");
+      const exportExposureSummary = document.getElementById("exportExposureSummary");
       const detailBanner = document.getElementById("detailBanner");
       const replayBanner = document.getElementById("replayBanner");
       const simActionType = document.getElementById("simActionType");
@@ -858,22 +884,84 @@ def admin_dashboard_ui() -> HTMLResponse:
         const idEntries = [
           ["event_id", detail.event_id],
           ["request_id", detail.request_id],
-          ["policy_id", detail.policy_id || "none"],
+          ["policy_id", detail.policy_id || null],
         ];
         for (const [label, value] of idEntries) {
-          const pill = document.createElement("span");
-          pill.className = "id-pill";
-          pill.textContent = `${label}: ${value}`;
-          container.appendChild(pill);
+          if (!value) continue;
+          const row = document.createElement("div");
+          row.className = "id-copy-row";
 
-          if (value && value !== "none") {
-            const copyBtn = document.createElement("button");
-            copyBtn.className = "button";
-            copyBtn.textContent = `Copy ${label}`;
-            copyBtn.addEventListener("click", () => copyToClipboard(value, label));
-            container.appendChild(copyBtn);
-          }
+          const key = document.createElement("div");
+          key.className = "id-key";
+          key.textContent = label;
+          row.appendChild(key);
+
+          const valueCell = document.createElement("div");
+          valueCell.className = "id-value";
+          valueCell.textContent = String(value);
+          row.appendChild(valueCell);
+
+          const copyBtn = document.createElement("button");
+          copyBtn.className = "button";
+          copyBtn.textContent = "Copy";
+          copyBtn.addEventListener("click", () => copyToClipboard(value, label));
+          row.appendChild(copyBtn);
+
+          container.appendChild(row);
         }
+      }
+
+      function formatCents(cents) {
+        if (!Number.isFinite(cents)) return "n/a";
+        return `${cents} cents ($${(cents / 100).toFixed(2)})`;
+      }
+
+      function decimalStringToCents(value) {
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return Math.round(value * 100);
+        }
+        if (typeof value !== "string" || value.trim() === "") {
+          return null;
+        }
+        const parsed = Number.parseFloat(value);
+        if (!Number.isFinite(parsed)) {
+          return null;
+        }
+        return Math.round(parsed * 100);
+      }
+
+      function buildExposureSummary(exposure) {
+        if (!exposure) {
+          return null;
+        }
+        const dailyTotalCents = decimalStringToCents(exposure.daily_total_amount);
+        const perUserDailyCents = decimalStringToCents(exposure.per_user_daily_amount);
+        const financialTotalCents = Number.isFinite(exposure.financial_total_amount_cents)
+          ? exposure.financial_total_amount_cents
+          : null;
+        return {
+          action_type_daily_exposure: {
+            daily_total_amount: dailyTotalCents === null
+              ? `${exposure.daily_total_amount ?? "n/a"}`
+              : formatCents(dailyTotalCents),
+            per_user_daily_amount: perUserDailyCents === null
+              ? `${exposure.per_user_daily_amount ?? "n/a"}`
+              : formatCents(perUserDailyCents),
+            per_user_daily_count: exposure.per_user_daily_count ?? "n/a",
+          },
+          combined_financial_exposure: {
+            financial_total_amount_cents: financialTotalCents === null ? "n/a" : formatCents(financialTotalCents),
+          },
+        };
+      }
+
+      function buildExportExposurePreview(items) {
+        return (items || []).map((item) => ({
+          event_id: item.event_id,
+          action_type: item.action_type,
+          decision: item.decision,
+          exposure_summary: buildExposureSummary(item.exposure_snapshot_json),
+        }));
       }
 
       function markSelectedDecisionRow(eventId) {
@@ -1136,6 +1224,7 @@ def admin_dashboard_ui() -> HTMLResponse:
         }
         localStorage.setItem(API_KEY_STORAGE_KEY, key);
 
+        exportExposureSummary.textContent = "Loading exposure summary...";
         document.getElementById("exportResult").textContent = "Loading exported decisions...";
         const response = await fetch(`/v1/admin/decisions/export?${buildExportQueryParams().toString()}`, { headers: getHeaders() });
         const data = await response.json();
@@ -1145,6 +1234,7 @@ def admin_dashboard_ui() -> HTMLResponse:
             : `Export failed: ${JSON.stringify(data)}`;
           showBanner(exportBanner, message, false);
           latestExportData = null;
+          exportExposureSummary.textContent = "Export failed.";
           document.getElementById("exportResult").textContent = "Export failed.";
           updateActionButtonStates();
           return;
@@ -1153,12 +1243,14 @@ def admin_dashboard_ui() -> HTMLResponse:
         latestExportData = data || [];
         if (!latestExportData.length) {
           showBanner(exportBanner, "Export completed with no matching results.", true);
+          exportExposureSummary.textContent = "No decision events found for the selected filters.";
           document.getElementById("exportResult").textContent = "No decision events found for the selected filters.";
           updateActionButtonStates();
           return;
         }
 
         showBanner(exportBanner, `Exported ${latestExportData.length} decision event(s).`, true);
+        exportExposureSummary.textContent = formatJson(buildExportExposurePreview(latestExportData));
         document.getElementById("exportResult").textContent = formatJson(latestExportData);
         updateActionButtonStates();
       }
@@ -1187,6 +1279,9 @@ def admin_dashboard_ui() -> HTMLResponse:
         document.getElementById("simRefundAmountWrap").classList.toggle("hidden", !isRefund);
         document.getElementById("simCreditAmountWrap").classList.toggle("hidden", isRefund);
         document.getElementById("simCreditTypeWrap").classList.toggle("hidden", isRefund);
+        simRefundAmountInput.disabled = !isRefund;
+        simCreditAmountInput.disabled = isRefund;
+        document.getElementById("simCreditType").disabled = isRefund;
       }
 
       function parseOptionalInt(inputId) {
@@ -1264,6 +1359,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           policy_id: result.policy_id,
           policy_version: result.policy_version,
           exposure_context_used: result.exposure_context_used,
+          exposure_context_summary: buildExposureSummary(result.exposure_context_used),
         };
         document.getElementById("simulationResult").textContent = formatJson(output);
       }
@@ -1690,6 +1786,7 @@ def admin_dashboard_ui() -> HTMLResponse:
           would_reason_codes: data.would_reason_codes,
           policy_id: data.policy_id,
           policy_version: data.policy_version,
+          exposure_summary: buildExposureSummary(data.exposure_snapshot_json),
           exposure_snapshot_json: data.exposure_snapshot_json,
           action_payload_json: data.action_payload_json,
         };
